@@ -31,6 +31,9 @@ def main() -> int:
     args = ap.parse_args()
     REPORTS.mkdir(exist_ok=True)
     PACKS.mkdir(exist_ok=True)
+    if PROFILE["search"].get("paused"):
+        print("Agent is paused (profile.json search.paused = true). Nothing to do.")
+        return 0
 
     # 1. search
     raw = fetch_all(SOURCES, PROFILE)
