@@ -72,6 +72,14 @@ input[type=range]{accent-color:var(--accent)}
 .country .name{font-weight:500}
 .country.off .name{color:var(--faint);text-decoration:line-through}
 .chip.pay{background:#e8f5e9;color:#1b5e20;font-family:var(--mono)}
+.chip.mail{background:#e3f2fd;color:#0d47a1}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:50;padding:16px}
+.modal>div{background:var(--panel);border-radius:12px;max-width:720px;width:100%;max-height:90vh;overflow:auto;padding:18px;box-shadow:0 20px 60px rgba(0,0,0,.3)}
+.modal label{display:block;font-size:12px;color:var(--muted);margin:10px 0 4px}
+.modal input,.modal textarea{width:100%;font:inherit;border:1px solid var(--line);border-radius:8px;padding:8px;background:var(--panel-2);color:var(--ink)}
+.modal textarea{min-height:260px;font-size:13px;line-height:1.45}
+.mail-set label{display:block;font-size:12px;color:var(--muted);margin:8px 0 3px}
+.mail-set input,.mail-set select{width:100%;font:inherit;border:1px solid var(--line);border-radius:8px;padding:6px 8px;background:var(--panel-2);color:var(--ink)}
 .chip.sec{background:#fff3e0;color:#8a4b00}
 .sw{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);cursor:pointer;white-space:nowrap}
 .sw input{accent-color:var(--accent);width:15px;height:15px;margin:0}
@@ -190,6 +198,19 @@ details summary{cursor:pointer;color:var(--muted);font-size:12px;margin-top:6px}
       <div class="row" style="margin-top:8px"><label for="minScoreOil">Oil &amp; gas minimum</label><input type="number" id="minScoreOil" min="30" max="90" step="5"></div>
       <p class="hint">Below the minimum a job goes to Review instead of To apply. 55 balanced · 65 strict · 45 wide.</p>
     </div>
+    <div class="card mail-set">
+      <h2>E-mail applications</h2>
+      <p class="hint" style="margin:0 0 4px">Ads that say "send your CV to …" get a <b>Send application</b> button. The e-mail goes from your own address with your CV attached; a copy is kept in <span class="mono">data/sent</span>.</p>
+      <label>Mail provider</label><select id="mPreset"><option value="gmail">Gmail</option><option value="outlook">Outlook.com / Hotmail</option><option value="office365">Microsoft 365 (work)</option><option value="yahoo">Yahoo</option><option value="">Other (SMTP below)</option></select>
+      <div id="mCustom" hidden><label>SMTP server</label><input id="mHost" placeholder="smtp.example.com"><label>Port</label><input id="mPort" value="587"></div>
+      <label>Your e-mail address</label><input id="mUser" placeholder="name@gmail.com" autocomplete="off">
+      <label>App password <span id="mPwState"></span></label><input id="mPw" type="password" placeholder="16-character app password" autocomplete="new-password">
+      <p class="hint" style="margin:2px 0 0">Not your normal password: create an <b>app password</b> in your mail account's security settings (Gmail: Security → 2-Step Verification → App passwords). It is stored only in <span class="mono">data/mail.json</span> on this PC.</p>
+      <label>Name shown as sender</label><input id="mName" placeholder="Shuaib Husain Abbas">
+      <label class="sw" style="margin-top:8px"><input type="checkbox" id="mCc"> Send me a copy of every application</label>
+      <label>CV to attach <span id="mCvState" class="hint"></span></label><input type="file" id="mCv" accept="application/pdf">
+      <div class="row" style="gap:6px;margin-top:10px"><button class="primary" id="mSave">Save e-mail settings</button><button id="mTest">Test sign-in</button></div>
+    </div>
     <div class="card keys">
       <h2>Job sources <span class="hint" style="margin:0;text-transform:none;letter-spacing:0">free keys</span></h2>
       <p class="hint" style="margin:0">LinkedIn, SEEK, Rigzone, Gulf Job Paper (newspaper ads) and employer sites need no key. Jooble adds Bayt, GulfTalent and Naukrigulf listings for each Gulf country — one free key per country from <span class="mono">xx.jooble.org/api/about</span>.</p>
@@ -233,7 +254,7 @@ details summary{cursor:pointer;color:var(--muted);font-size:12px;margin-top:6px}
   
   const STATUSES = ["New","Review","Applied","Interview","Offer","Rejected","Skipped","Found (apply off)"];
   const TAB_OF = s => ["Applied","Interview","Offer"].includes(s) ? "applied" : (s==="New" ? "todo" : (s==="Review" ? "review" : "archive"));
-  const FIELDS = ["found_date","score","verdict","title","company","location","country","source","url","status","applied_date","notes","pack_file","user_notes","category","sector","salary"];
+  const FIELDS = ["found_date","score","verdict","title","company","location","country","source","url","status","applied_date","notes","pack_file","user_notes","category","sector","salary","apply_email"];
   const JOOBLE = [["sa","Saudi Arabia"],["ae","UAE"],["qa","Qatar"],["kw","Kuwait"],["om","Oman"],["ca","Canada"],["au","Australia"],["us","Global (jooble.org)"]];
   
   let profile=null, profileSha="", keys=null, keysSha="", tracker=[], edits={}, cat="civil", tab="todo", packCache={};
@@ -264,7 +285,7 @@ details summary{cursor:pointer;color:var(--muted);font-size:12px;margin-top:6px}
       const [pf, tr, kf] = await Promise.all([getFile("profile.json"), getFile("tracker.csv"), getFile("keys.json").catch(()=>({text:'{"jooble":{}}',sha:""}))]);
       profile=JSON.parse(pf.text); profileSha=pf.sha; tracker=parseCSV(tr.text); keys=JSON.parse(kf.text); keysSha=kf.sha;
       tracker.forEach(r=>{ r.category=r.category||"civil"; if(edits[r.url]) Object.assign(r, edits[r.url]); });
-      renderSettings(); renderKeys(); buildFilters(); renderJobs(); loadRuns();
+      renderSettings(); renderKeys(); buildFilters(); renderJobs(); loadRuns(); loadMail();
     }catch(e){ toast("Load failed: "+e.message); setState("off","app not reachable — start JobAgent"); }
   }
   let pollT=null;
@@ -364,12 +385,12 @@ details summary{cursor:pointer;color:var(--muted);font-size:12px;margin-top:6px}
       el.innerHTML=`<div class="score ${cls}">${sc}<small>SCORE</small></div>
         <div>
           <div class="title"><a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.title)}</a></div>
-          <div class="meta"><span class="co">${esc(r.company)}</span><span>${esc(r.location||r.country)}</span><span class="mono">${esc(r.found_date)}</span><span class="chip src">${esc(r.source)}</span>${cat!=="civil"?`<span class="chip cat">${esc(roleLabel(r.category))}</span>`:""}${r.salary?`<span class="chip pay" title="Pay mentioned in the posting">${esc(r.salary)}</span>`:""}${r.sector==="oil_gas"&&cat!=="oil"?`<span class="chip sec">Oil &amp; gas</span>`:""}${r.applied_date?`<span class="chip Applied">applied ${esc(r.applied_date)}</span>`:""}</div>
+          <div class="meta"><span class="co">${esc(r.company)}</span><span>${esc(r.location||r.country)}</span><span class="mono">${esc(r.found_date)}</span><span class="chip src">${esc(r.source)}</span>${cat!=="civil"?`<span class="chip cat">${esc(roleLabel(r.category))}</span>`:""}${r.salary?`<span class="chip pay" title="Pay mentioned in the posting">${esc(r.salary)}</span>`:""}${r.sector==="oil_gas"&&cat!=="oil"?`<span class="chip sec">Oil &amp; gas</span>`:""}${r.apply_email?`<span class="chip mail" title="${esc(r.apply_email)}">apply by e-mail</span>`:""}${r.applied_date?`<span class="chip Applied">applied ${esc(r.applied_date)}</span>`:""}</div>
         </div>
         <div class="ctrl">
           <select class="st">${STATUSES.map(s=>`<option ${s===r.status?"selected":""}>${s}</option>`).join("")}</select>
           <input class="notes" type="text" placeholder="Your note" value="${esc(r.user_notes||"")}">
-          <div class="quick">${tab==="todo"?'<button class="small primary mark">Mark applied</button><button class="small skip">Skip</button>':""}${r.pack_file?'<button class="small pack-btn">Pack</button>':""}</div>
+          <div class="quick">${r.apply_email&&TAB_OF(r.status)!=="applied"?'<button class="small primary send">Send application</button>':""}${tab==="todo"?'<button class="small mark">Mark applied</button><button class="small skip">Skip</button>':""}${r.pack_file?'<button class="small pack-btn">Pack</button>':""}</div>
         </div>`;
       box.appendChild(el);
       const setStatus=s=>{ edit(r,{status:s, applied_date:s==="Applied"?(r.applied_date||today()):(r.applied_date||"")}); renderJobs(); toast(s==="Applied"?"Moved to Applied — press Save":"Status set — press Save"); };
@@ -378,6 +399,7 @@ details summary{cursor:pointer;color:var(--muted);font-size:12px;margin-top:6px}
       const skp=el.querySelector(".skip"); if(skp) skp.addEventListener("click",()=>setStatus("Skipped"));
       let t; el.querySelector("input.notes").addEventListener("input",e=>{clearTimeout(t); t=setTimeout(()=>edit(r,{user_notes:e.target.value}),400);});
       const pb=el.querySelector(".pack-btn"); if(pb) pb.addEventListener("click",()=>togglePack(el,r,pb));
+      const sb=el.querySelector(".send"); if(sb) sb.addEventListener("click",()=>openSend(r));
     });
   }
   function edit(r,patch){ Object.assign(r,patch); edits[r.url]={...(edits[r.url]||{}),...patch}; markDirty("tracker"); }
@@ -399,6 +421,35 @@ details summary{cursor:pointer;color:var(--muted);font-size:12px;margin-top:6px}
       p.querySelectorAll("button.copy").forEach(b=>b.addEventListener("click",()=>{ const txt=b.dataset.ans ?? (p.querySelector(`pre[data-${b.dataset.t}]`)||{}).textContent ?? ""; navigator.clipboard.writeText(txt).then(()=>toast("Copied")).catch(()=>toast("Copy blocked — select the text")); }));
     }catch(e){ toast("Pack unavailable: "+e.message); }
     btn.disabled=false;
+  }
+
+  // ---------- e-mail applications
+  let mail={};
+  async function loadMail(){
+    try{ mail=await api("/api/mail"); }catch(_){ mail={}; }
+    $("mPreset").value=mail.preset??"gmail"; $("mCustom").hidden=!!$("mPreset").value; $("mHost").value=mail.smtp_host||""; $("mPort").value=mail.smtp_port||587;
+    $("mUser").value=mail.user||""; $("mName").value=mail.from_name||""; $("mCc").checked=!!mail.cc_self;
+    $("mPwState").textContent=mail.has_password?"(saved)":"(not set)"; $("mCvState").textContent=mail.has_cv?("— "+(mail.cv_name||"CV.pdf")+" attached"):"— none yet";
+  }
+  $("mPreset").addEventListener("change",()=>{ $("mCustom").hidden=!!$("mPreset").value; });
+  $("mSave").addEventListener("click",async()=>{ try{ const d={preset:$("mPreset").value,smtp_host:$("mHost").value.trim(),smtp_port:+$("mPort").value||587,user:$("mUser").value.trim(),from_name:$("mName").value.trim(),cc_self:$("mCc").checked}; if($("mPw").value) d.password=$("mPw").value; await api("/api/mail",d); $("mPw").value=""; toast("E-mail settings saved"); loadMail(); }catch(e){ toast("Save failed: "+e.message); } });
+  $("mTest").addEventListener("click",async()=>{ $("mTest").disabled=true; try{ const r=await api("/api/mail-test",{}); toast(r.message); }catch(e){ toast("Test failed: "+e.message); } $("mTest").disabled=false; });
+  $("mCv").addEventListener("change",async()=>{ const f=$("mCv").files[0]; if(!f) return; const b=await f.arrayBuffer(); let bin=""; new Uint8Array(b).forEach(x=>bin+=String.fromCharCode(x)); try{ const r=await api("/api/cv",{name:f.name,data:btoa(bin)}); toast(r.ok?"CV attached: "+r.name:(r.error||"Not saved")); loadMail(); }catch(e){ toast("Upload failed: "+e.message); } });
+  async function openSend(r){
+    if(!mail.has_password||!mail.user){ toast("Fill in the e-mail settings on the left first"); $("mUser").focus(); return; }
+    if(!mail.has_cv){ toast("Attach your CV PDF in the e-mail settings first"); $("mCv").focus(); return; }
+    let d; try{ d=await api("/api/draft?url="+encodeURIComponent(r.url)); }catch(e){ toast("Could not draft: "+e.message); return; }
+    const m=document.createElement("div"); m.className="modal";
+    m.innerHTML=`<div><h2 style="margin-bottom:4px">Send application</h2><div class="hint" style="margin:0">${esc(r.title)} — ${esc(r.company)}. Edit anything, then Send. Your CV (${esc(mail.cv_name||"CV.pdf")}) is attached automatically.</div>
+      <label>To</label><input id="sTo" value="${esc(d.to)}"><label>Subject</label><input id="sSub" value="${esc(d.subject)}"><label>Message</label><textarea id="sBody">${esc(d.body)}</textarea>
+      <div class="row" style="gap:6px;margin-top:12px;justify-content:flex-end"><button id="sCancel">Cancel</button><button class="primary" id="sSend">Send</button></div></div>`;
+    document.body.appendChild(m);
+    m.querySelector("#sCancel").addEventListener("click",()=>m.remove());
+    m.addEventListener("click",e=>{ if(e.target===m) m.remove(); });
+    m.querySelector("#sSend").addEventListener("click",async()=>{ const b=m.querySelector("#sSend"); b.disabled=true; b.textContent="Sending…";
+      try{ const res=await api("/api/send",{url:r.url,to:m.querySelector("#sTo").value.trim(),subject:m.querySelector("#sSub").value.trim(),body:m.querySelector("#sBody").value});
+        if(res.ok){ toast("Sent to "+res.to); m.remove(); Object.assign(r,{status:"Applied",applied_date:r.applied_date||today()}); renderJobs(); } else { toast(res.error||"Not sent"); b.disabled=false; b.textContent="Send"; } }
+      catch(e){ toast("Not sent: "+e.message); b.disabled=false; b.textContent="Send"; } });
   }
 
   // ---------- save everything in one go

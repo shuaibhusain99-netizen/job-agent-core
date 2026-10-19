@@ -40,6 +40,21 @@ def find_salary(text: str) -> str:
     return ""
 
 
+EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+EMAIL_SKIP = re.compile(r"noreply|no-reply|donotreply|unsubscribe|privacy|support@|info@linkedin|@linkedin|@indeed|@glassdoor|@rigzone|@gulfjobpaper|@seek|@jooble|example\.com|@sentry|@google", re.I)
+
+
+def find_apply_email(text: str) -> str:
+    """First e-mail address in the posting that looks like a recruitment inbox (comma-separated if several)."""
+    found = []
+    for m in EMAIL_RE.finditer(text):
+        e = m.group(0).strip(".").lower()
+        if EMAIL_SKIP.search(e) or e in found:
+            continue
+        found.append(e)
+    return ",".join(found[:3])
+
+
 def find_sector(j: dict, profile: dict) -> str:
     text = (j["title"] + " " + j["company"] + " " + j.get("description", "")).lower()
     for key, sec in (profile.get("sectors") or {}).items():
@@ -65,10 +80,13 @@ def score(j: dict, profile: dict) -> tuple[int, str, list[str]]:
     j["category"] = best[3]
     j["sector"] = find_sector(j, profile)
     j["salary"] = find_salary(j["title"] + " " + j.get("description", ""))
+    j["apply_email"] = find_apply_email(j.get("description", ""))
     if j["sector"]:
         best[2].append("sector:" + j["sector"])
     if j["salary"]:
         best[2].append("pay: " + j["salary"])
+    if j["apply_email"]:
+        best[2].append("apply by e-mail")
     return best[0], best[1], best[2]
 
 

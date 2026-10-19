@@ -7,7 +7,7 @@ from pathlib import Path
 from .util import log
 
 FIELDS = ["found_date", "score", "verdict", "title", "company", "location", "country", "source",
-          "url", "status", "applied_date", "notes", "pack_file", "user_notes", "category", "sector", "salary"]
+          "url", "status", "applied_date", "notes", "pack_file", "user_notes", "category", "sector", "salary", "apply_email"]
 
 
 def load(path: Path) -> dict[str, dict]:

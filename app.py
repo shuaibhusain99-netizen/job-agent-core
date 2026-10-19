@@ -11,7 +11,9 @@ your browser. All data lives in a `data` folder next to the program:
   JobAgent.exe --run      search once without opening the app (used by the daily scheduled task)
 """
 from __future__ import annotations
-import argparse, io, json, os, shutil, subprocess, sys, threading, time, webbrowser
+import argparse, base64, csv, io, json, os, shutil, smtplib, ssl, subprocess, sys, threading, time, webbrowser
+from email.message import EmailMessage
+from email.utils import formataddr
 from datetime import datetime
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
@@ -32,7 +34,7 @@ def ensure_data():
             shutil.copy(BUNDLE / name, DATA / name)
     upgrade_config()
     if not (DATA / "tracker.csv").exists():
-        (DATA / "tracker.csv").write_text("﻿found_date,score,verdict,title,company,location,country,source,url,status,applied_date,notes,pack_file,user_notes,category,sector,salary\n", encoding="utf-8")
+        (DATA / "tracker.csv").write_text("﻿found_date,score,verdict,title,company,location,country,source,url,status,applied_date,notes,pack_file,user_notes,category,sector,salary,apply_email\n", encoding="utf-8")
 
 
 def _merge(dst, src, path=""):
@@ -80,10 +82,11 @@ def upgrade_config():
     try:
         t = DATA / "tracker.csv"
         head = t.read_text(encoding="utf-8-sig").splitlines()[0] if t.exists() else ""
-        if head and "sector" not in head:
+        missing = [c for c in ("sector", "salary", "apply_email") if head and c not in head.split(",")]
+        if missing:
             import csv, io
             rows = list(csv.DictReader(io.StringIO(t.read_text(encoding="utf-8-sig"))))
-            fields = head.split(",") + ["sector", "salary"]
+            fields = head.split(",") + missing
             with t.open("w", encoding="utf-8-sig", newline="") as f:
                 w = csv.DictWriter(f, fieldnames=fields); w.writeheader(); w.writerows(rows)
     except Exception as e:  # noqa
@@ -159,6 +162,98 @@ def schedule_status() -> bool:
     return r.returncode == 0
 
 
+# ----------------------------------------------------------------------------- e-mail applications
+MAIL_FILE = "mail.json"
+PRESETS = {"gmail": ("smtp.gmail.com", 587), "outlook": ("smtp-mail.outlook.com", 587), "office365": ("smtp.office365.com", 587), "yahoo": ("smtp.mail.yahoo.com", 587)}
+
+
+def mail_settings() -> dict:
+    try:
+        return json.loads((DATA / MAIL_FILE).read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def mail_public() -> dict:
+    m = mail_settings()
+    return {k: v for k, v in m.items() if k != "password"} | {"has_password": bool(m.get("password")), "has_cv": (DATA / "CV.pdf").exists()}
+
+
+def smtp_connect(m: dict):
+    host, port = PRESETS.get(m.get("preset", ""), (m.get("smtp_host", ""), int(m.get("smtp_port") or 587)))
+    if not host:
+        raise ValueError("No SMTP server set")
+    s = smtplib.SMTP(host, port, timeout=30)
+    s.ehlo(); s.starttls(context=ssl.create_default_context()); s.ehlo()
+    s.login(m["user"], m["password"])
+    return s
+
+
+def tracker_rows() -> list[dict]:
+    t = DATA / "tracker.csv"
+    return list(csv.DictReader(io.StringIO(t.read_text(encoding="utf-8-sig")))) if t.exists() else []
+
+
+def tracker_write(rows: list[dict]):
+    if not rows:
+        return
+    fields = list(rows[0].keys())
+    with (DATA / "tracker.csv").open("w", encoding="utf-8-sig", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore"); w.writeheader(); w.writerows(rows)
+
+
+def draft_email(row: dict) -> dict:
+    """Subject + body for one tracker row, from its application pack when there is one."""
+    profile = json.loads((DATA / "profile.json").read_text(encoding="utf-8"))
+    c = profile["candidate"]
+    body = ""
+    if row.get("pack_file") and (DATA / row["pack_file"]).exists():
+        md = (DATA / row["pack_file"]).read_text(encoding="utf-8")
+        import re
+        m = re.search(r"## Cover letter\n+([\s\S]*?)(?=\n## |$)", md)
+        if m:
+            body = m.group(1).strip()
+            body = re.sub(r"^\d{1,2} \w+ \d{4}\n+", "", body)   # the letter's date line is odd in an e-mail
+    if not body:
+        body = (f"Dear Hiring Manager,\n\nI would like to apply for the {row['title']} position"
+                f"{' with ' + row['company'] if row.get('company') and row['company'] not in ('Unknown', 'Gulf Job Paper') else ''}. "
+                f"I am a civil engineer with {c['years_experience']} years of site and contract experience on water-network, roads and "
+                f"airport infrastructure in Bahrain, NEBOSH IGC certified, available on {c['notice_period']}' notice and ready to relocate.\n\n"
+                f"My CV is attached. I would welcome the chance to discuss the role.\n\nYours sincerely,\n{c['name']}\n{c['phone']} | {c['email']}")
+    subject = f"Application for {row['title']} - {c['name']}"
+    return {"to": row.get("apply_email", ""), "subject": subject, "body": body, "cv": "CV.pdf" if (DATA / "CV.pdf").exists() else ""}
+
+
+def send_application(url: str, to: str, subject: str, body: str) -> dict:
+    m = mail_settings()
+    if not (m.get("user") and m.get("password")):
+        raise ValueError("E-mail settings are not complete (address + app password)")
+    cv = DATA / "CV.pdf"
+    if not cv.exists():
+        raise ValueError("No CV attached yet - choose your CV PDF in the e-mail settings")
+    msg = EmailMessage()
+    msg["From"] = formataddr((m.get("from_name") or m["user"], m["user"]))
+    msg["To"] = ", ".join(x.strip() for x in to.split(",") if x.strip())
+    if m.get("cc_self"):
+        msg["Bcc"] = m["user"]
+    msg["Subject"] = subject
+    msg.set_content(body)
+    msg.add_attachment(cv.read_bytes(), maintype="application", subtype="pdf", filename=m.get("cv_name") or "CV.pdf")
+    with smtp_connect(m) as s:
+        s.send_message(msg)
+    sent = DATA / "sent"; sent.mkdir(exist_ok=True)
+    stamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    safe = "".join(ch if ch.isalnum() else "-" for ch in subject)[:60].strip("-")
+    (sent / f"{stamp}_{safe}.eml").write_bytes(bytes(msg))
+    rows = tracker_rows()
+    for r in rows:
+        if r.get("url") == url:
+            r["status"] = "Applied"; r["applied_date"] = r.get("applied_date") or datetime.now().date().isoformat()
+            r["user_notes"] = (r.get("user_notes", "") + f" | e-mailed {msg['To']} {stamp[:10]}").strip(" |")
+    tracker_write(rows)
+    return {"ok": True, "to": msg["To"], "saved": f"sent/{stamp}_{safe}.eml"}
+
+
 # ----------------------------------------------------------------------------- HTTP
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):  # quiet
@@ -194,6 +289,14 @@ class Handler(BaseHTTPRequestHandler):
                 runs = [l.split("\t", 1) for l in (DATA / "runs.log").read_text(encoding="utf-8").splitlines()[-8:] if "\t" in l]
             return self._json({"running": STATE["running"], "log": STATE["log"][-6:], "summary": STATE["summary"], "started": STATE["started"],
                                "runs": [{"at": a, "summary": b} for a, b in reversed(runs)], "scheduled": schedule_status(), "data_dir": str(DATA)})
+        if u.path == "/api/mail":
+            return self._json(mail_public())
+        if u.path == "/api/draft":
+            url = q.get("url", [""])[0]
+            row = next((r for r in tracker_rows() if r.get("url") == url), None)
+            if not row:
+                return self._json({"error": "job not in tracker"}, 404)
+            return self._json(draft_email(row))
         return self._json({"error": "no route"}, 404)
 
     def do_POST(self):
@@ -211,6 +314,38 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/schedule":
             d = json.loads(body or b"{}")
             return self._json({"ok": True, "message": schedule(bool(d.get("enable")), int(d.get("hour", 7))), "scheduled": schedule_status()})
+        if u.path == "/api/mail":
+            d = json.loads(body or b"{}")
+            m = mail_settings()
+            for k in ("preset", "smtp_host", "smtp_port", "user", "from_name", "cc_self"):
+                if k in d:
+                    m[k] = d[k]
+            if d.get("password"):
+                m["password"] = d["password"]
+            (DATA / MAIL_FILE).write_text(json.dumps(m, indent=2), encoding="utf-8")
+            return self._json({"ok": True} | mail_public())
+        if u.path == "/api/mail-test":
+            try:
+                with smtp_connect(mail_settings()):
+                    pass
+                return self._json({"ok": True, "message": "Signed in to the mail server - sending will work."})
+            except Exception as e:
+                return self._json({"ok": False, "message": f"{type(e).__name__}: {e}"})
+        if u.path == "/api/cv":
+            d = json.loads(body or b"{}")
+            raw = base64.b64decode(d.get("data", ""))
+            if not raw.startswith(b"%PDF"):
+                return self._json({"ok": False, "error": "Please choose a PDF file"})
+            (DATA / "CV.pdf").write_bytes(raw)
+            m = mail_settings(); m["cv_name"] = d.get("name") or "CV.pdf"
+            (DATA / MAIL_FILE).write_text(json.dumps(m, indent=2), encoding="utf-8")
+            return self._json({"ok": True, "name": m["cv_name"]})
+        if u.path == "/api/send":
+            d = json.loads(body or b"{}")
+            try:
+                return self._json(send_application(d["url"], d["to"], d["subject"], d["body"]))
+            except Exception as e:
+                return self._json({"ok": False, "error": f"{type(e).__name__}: {e}"})
         if u.path == "/api/open-folder":
             try:
                 if os.name == "nt": os.startfile(DATA)  # type: ignore[attr-defined]
