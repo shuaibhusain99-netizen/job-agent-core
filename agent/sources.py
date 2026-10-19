@@ -14,9 +14,16 @@ def fetch_jooble(cfg: dict, profile: dict) -> list[dict]:
         log("Jooble: skipped (no JOOBLE_API_KEY secret)")
         return []
     out = []
+    budget = cfg.get("max_requests_per_run", 25)
+    used = 0
     for country in countries(profile):
-        for q in profile["search"]["queries"]:
-            for page in range(1, cfg.get("pages_per_query", 2) + 1):
+        if cfg.get("countries") and country not in cfg["countries"]:
+            continue
+        for q in cfg.get("queries") or profile["search"]["queries"]:
+            for page in range(1, cfg.get("pages_per_query", 1) + 1):
+                if used >= budget:
+                    break
+                used += 1
                 status, data = http_json(f"https://jooble.org/api/{key}",
                                          {"keywords": q, "location": country, "page": page})
                 if status != 200 or not data:
@@ -28,7 +35,7 @@ def fetch_jooble(cfg: dict, profile: dict) -> list[dict]:
                 if len(rows) < 20:
                     break
                 time.sleep(0.5)
-    log(f"Jooble: {len(out)} rows")
+    log(f"Jooble: {len(out)} rows ({used} requests)")
     return out
 
 
