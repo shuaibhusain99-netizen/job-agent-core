@@ -89,7 +89,19 @@
     ],
     "min_score": 55,
     "max_results_per_source": 100,
-    "_countries_help": "weight 0-1 = how much you want it; search=false stops searching it; apply=false still logs matches to the tracker but marks them 'Found (apply off)' and makes no application pack."
+    "_countries_help": "weight 0-1 = how much you want it; search=false stops searching it; apply=false still logs matches to the tracker but marks them 'Found (apply off)' and makes no application pack.",
+    "queries_other": [
+      "HSE officer",
+      "safety officer",
+      "quantity surveyor",
+      "planning engineer",
+      "document controller",
+      "project coordinator",
+      "storekeeper",
+      "inventory controller",
+      "operations analyst"
+    ],
+    "min_score_other": 60
   },
   "target_titles": [
     "civil engineer",
@@ -385,5 +397,146 @@
     "qa/?qc|quality|inspection": "Yes - QA/QC procedures, inspection requests and monthly quantity reports on airfield works at Bahrain International Airport; quality verification of excavation, pipe repairs, backfill and asphalt reinstatement on the EWA contract.",
     "driving|licen[cs]e": "Valid Bahrain driving licence.",
     "arabic|language": "Arabic native, English fluent."
+  },
+  "categories": {
+    "_comment": "Every job is scored against each category; the best wins and is stored in the tracker's 'category' column. 'civil' uses target_titles/keyword_points above. Other categories list their own titles and keywords; title_penalties and hard rejects still apply to all.",
+    "hse": {
+      "label": "HSE / Safety",
+      "target_titles": [
+        "hse officer",
+        "safety officer",
+        "hse engineer",
+        "safety engineer",
+        "hse supervisor",
+        "safety supervisor",
+        "hse coordinator",
+        "hse advisor",
+        "safety advisor",
+        "ehs officer",
+        "hse inspector"
+      ],
+      "keyword_points": {
+        "nebosh": 15,
+        "iosh": 8,
+        "risk assessment": 6,
+        "permit to work": 6,
+        "toolbox": 4,
+        "incident": 4,
+        "investigation": 4,
+        "construction": 4,
+        "site": 2,
+        "osha": 3,
+        "iso 45001": 4,
+        "fire": 2,
+        "first aid": 3,
+        "inspection": 3,
+        "audit": 3
+      }
+    },
+    "qs_planning": {
+      "label": "QS / Planning / Document control",
+      "target_titles": [
+        "quantity surveyor",
+        "qs engineer",
+        "planning engineer",
+        "cost engineer",
+        "cost control engineer",
+        "document controller",
+        "project coordinator",
+        "project control engineer",
+        "contracts engineer",
+        "estimator",
+        "tender engineer",
+        "site supervisor",
+        "civil supervisor",
+        "construction supervisor"
+      ],
+      "keyword_points": {
+        "boq": 10,
+        "bill of quantities": 10,
+        "quantities": 4,
+        "measurement": 4,
+        "valuation": 4,
+        "cost": 3,
+        "claims": 4,
+        "contract": 3,
+        "primavera": 3,
+        "ms project": 4,
+        "schedule": 3,
+        "progress": 3,
+        "excel": 2,
+        "document": 2,
+        "reports": 2,
+        "construction": 3,
+        "civil": 4,
+        "site": 2
+      }
+    },
+    "stores_supply": {
+      "label": "Stores / Inventory / Supply",
+      "target_titles": [
+        "storekeeper",
+        "store keeper",
+        "inventory controller",
+        "inventory coordinator",
+        "warehouse supervisor",
+        "warehouse coordinator",
+        "material controller",
+        "materials coordinator",
+        "procurement officer",
+        "procurement coordinator",
+        "supply chain coordinator",
+        "logistics coordinator",
+        "asset coordinator"
+      ],
+      "keyword_points": {
+        "inventory": 8,
+        "stock": 5,
+        "materials": 5,
+        "warehouse": 4,
+        "procurement": 4,
+        "erp": 3,
+        "excel": 3,
+        "power apps": 5,
+        "reports": 2,
+        "reporting": 3,
+        "construction": 3,
+        "utility": 4,
+        "water": 3,
+        "fleet": 3,
+        "maintenance": 2
+      }
+    },
+    "data_reporting": {
+      "label": "Operations / Data reporting",
+      "target_titles": [
+        "operations analyst",
+        "reporting analyst",
+        "data analyst",
+        "mis analyst",
+        "operations coordinator",
+        "performance analyst",
+        "kpi analyst",
+        "business analyst",
+        "operations engineer",
+        "maintenance planner"
+      ],
+      "keyword_points": {
+        "excel": 5,
+        "power bi": 4,
+        "power apps": 6,
+        "dashboard": 4,
+        "kpi": 6,
+        "reporting": 5,
+        "data": 2,
+        "analysis": 3,
+        "operations": 3,
+        "maintenance": 3,
+        "utility": 4,
+        "water": 4,
+        "construction": 2,
+        "sql": 2
+      }
+    }
   }
 }
