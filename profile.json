@@ -67,7 +67,7 @@
       },
       "Bahrain": {
         "weight": 0.7,
-        "search": true,
+        "search": false,
         "apply": false
       },
       "Canada": {
