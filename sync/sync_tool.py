@@ -23,7 +23,7 @@ TRACKER = ROOT / "tracker.csv"
 PROFILE = ROOT / "profile.json"
 PACKS = ROOT / "applications"
 FIELDS = ["found_date", "score", "verdict", "title", "company", "location", "country", "source",
-          "url", "status", "applied_date", "notes", "pack_file"]
+          "url", "status", "applied_date", "notes", "pack_file", "user_notes"]
 
 
 def job_id(url: str) -> str:
