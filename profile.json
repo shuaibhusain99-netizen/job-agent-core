@@ -6,7 +6,7 @@
     "email": "shuaib.husain@outlook.com",
     "phone": "+973 3654 4485",
     "location": "Sitra, Bahrain",
-    "nationality": "Bahraini (GCC national)",
+    "nationality": "",
     "degree": "B.Sc. Civil Engineering, University of Bahrain (2021)",
     "years_experience": 4,
     "experience_start": "2021-11",
@@ -32,11 +32,7 @@
       "Arabic (native)",
       "English (fluent)"
     ],
-    "sce_status": "Eligible to register with the Saudi Council of Engineers as a GCC-national engineer; not yet registered",
-    "work_authorization": {
-      "GCC": "GCC national - no visa sponsorship needed",
-      "other": "Will require employer-supported work authorization (e.g. Canada work permit / Express Entry in progress)"
-    }
+    "sce_status": "Eligible to register with the Saudi Council of Engineers as a GCC-national engineer; not yet registered"
   },
   "search": {
     "countries": {
@@ -369,8 +365,8 @@
     "degree|bachelor|qualification": "Yes - B.Sc. Civil Engineering, University of Bahrain (2017-2021), GPA 3.17/4.0.",
     "years? of experience|how many years|experience level": "4 years of civil engineering experience (Nov 2021 - present): water-network maintenance, roads and infrastructure, and airfield works in Bahrain.",
     "notice|availability|start date|join": "Notice period 1 month; can join within 30 days of offer.",
-    "relocat|willing to work|based in|onsite|on-site|shift": "Yes - willing to relocate anywhere in the GCC and to work on site and on shifts. GCC (Bahraini) national, so work-permit processing in Saudi Arabia is straightforward.",
-    "saudi council|sce|license|licence|registration": "Eligible for Saudi Council of Engineers registration as a GCC-national civil engineer; registration can be completed on appointment.",
+    "relocat|willing to work|based in|onsite|on-site|shift": "Yes - willing to relocate and to work on site and on shifts.",
+    "saudi council|sce|license|licence|registration": "Eligible for Saudi Council of Engineers registration; registration can be completed on appointment.",
     "salary|expected|compensation": "Open to discussion in line with the role and market; happy to share expectations at interview.",
     "nebosh|iosh|safety cert|hse": "Yes - NEBOSH IGC, IOSH Working Safely, Highfield Fire Safety L2 and Risk Assessment L2, MEDIC First Aid.",
     "autocad|civil 3d|software": "AutoCAD and Civil 3D (project and course experience), STAAD Pro (training), MS Project, Excel, Power Apps.",
@@ -379,6 +375,6 @@
     "qa/?qc|quality|inspection": "Yes - QA/QC procedures, inspection requests and monthly quantity reports on airfield works at Bahrain International Airport; quality verification of excavation, pipe repairs, backfill and asphalt reinstatement on the EWA contract.",
     "driving|licen[cs]e": "Valid Bahrain driving licence.",
     "arabic|language": "Arabic native, English fluent.",
-    "visa|sponsor|work permit|iqama": "Bahraini (GCC) national - no visa sponsorship issues for employment in Saudi Arabia or other GCC states."
+    "visa|sponsor|work permit|iqama": "Eligible to work in the GCC; will support any work-permit process required."
   }
 }
