@@ -75,6 +75,9 @@ def score(j: dict, profile: dict) -> tuple[int, str, list[str]]:
             hits.append(term)
     kw = min(kw, 40)
     pts += kw
+    if len(j.get("description", "")) < 400 and "target title" in reasons:
+        pts += 15          # listing text only (no full description available): don't punish for missing keywords
+        reasons.append("listing only")
     if hits:
         reasons.append("keywords: " + ", ".join(hits[:8]))
 

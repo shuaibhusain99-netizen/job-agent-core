@@ -40,8 +40,10 @@
     ]
   },
   "linkedin_guest": {
-    "_comment": "Best effort. LinkedIn's public guest listing endpoint; frequently rate-limited. Skipped automatically on challenge.",
-    "enabled": true
+    "_comment": "LinkedIn public listings, all countries. pages x queries x countries requests; polite delay. Skips the rest of a country on a challenge.",
+    "enabled": true,
+    "pages": 3,
+    "days": 7
   },
   "workday": {
     "_comment": "Employer career sites on Workday. tenant / host / site verified from the employer's careers URL: https://<tenant>.<host>.myworkdayjobs.com/<site>",
@@ -91,5 +93,19 @@
   },
   "smartrecruiters": {
     "companies": []
+  },
+  "seek": {
+    "_comment": "SEEK Australia public search API (no key). Listing gives title/teaser/bullets/location/salary; job pages are blocked so scoring uses the listing text.",
+    "enabled": true,
+    "queries": [
+      "civil engineer",
+      "site engineer",
+      "project engineer civil",
+      "civil construction engineer",
+      "QA/QC engineer civil",
+      "water engineer",
+      "roads engineer"
+    ],
+    "pages": 3
   }
 }
