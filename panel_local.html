@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Job Agent</title>
+<meta name="description" content="Control panel for the job agent: settings, runs and the application tracker.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230f5e7a'/%3E%3Cpath d='M8 22h16M10 22V12l6-4 6 4v10' stroke='%23fff' stroke-width='2.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: sticky top bar · left rail (status, agent, settings) · main = category switch → status tabs → filter bar → job cards.
+   Drafting-paper neutrals with a blueprint-teal accent; green/amber/red reserved for meaning. */
+:root{
+  --bg:#f4f2ee; --panel:#ffffff; --panel-2:#f7f6f2; --ink:#1b2126; --muted:#656c74; --faint:#9aa1a8; --line:#dcd8cf; --line-2:#ebe8e1;
+  --accent:#0f5e7a; --accent-ink:#ffffff; --accent-soft:#e3eef3;
+  --ok:#2a7a4b; --ok-soft:#e2f1e7; --warn:#a86a00; --warn-soft:#f6ecd6; --bad:#a93a3a; --bad-soft:#f5e2e2;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif; --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+  --r:10px; --shadow:0 1px 2px rgba(20,25,30,.06),0 4px 16px rgba(20,25,30,.05); color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#13171a;--panel:#1b2024;--panel-2:#20262b;--ink:#e9e7e1;--muted:#a3aab1;--faint:#6f767d;--line:#2f363c;--line-2:#272d33;--accent:#62b8d6;--accent-ink:#0d1b22;--accent-soft:#1c2f38;--ok:#6fcb93;--ok-soft:#173224;--warn:#e5aa4b;--warn-soft:#3a2c12;--bad:#e57b7b;--bad-soft:#3b1f1f;--shadow:0 1px 2px rgba(0,0,0,.4),0 6px 20px rgba(0,0,0,.35);color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#13171a;--panel:#1b2024;--panel-2:#20262b;--ink:#e9e7e1;--muted:#a3aab1;--faint:#6f767d;--line:#2f363c;--line-2:#272d33;--accent:#62b8d6;--accent-ink:#0d1b22;--accent-soft:#1c2f38;--ok:#6fcb93;--ok-soft:#173224;--warn:#e5aa4b;--warn-soft:#3a2c12;--bad:#e57b7b;--bad-soft:#3b1f1f;--shadow:0 1px 2px rgba(0,0,0,.4),0 6px 20px rgba(0,0,0,.35);color-scheme:dark}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.45}
+body{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:0 40px}
+a{color:var(--accent)}
+h1{font-size:17px;font-weight:600;margin:0;letter-spacing:-.01em;display:flex;align-items:center;gap:10px}
+h1 .logo{width:26px;height:26px;border-radius:7px;background:var(--accent);display:inline-grid;place-items:center;flex:none}
+h2{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);margin:0 0 12px;display:flex;justify-content:space-between;align-items:center}
+button{font:inherit;font-weight:500;border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:8px;padding:7px 12px;cursor:pointer;transition:background .12s,border-color .12s}
+button:hover{border-color:var(--muted)}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+button.primary:hover{filter:brightness(1.07)}
+button.ghost{background:transparent}
+button.small{padding:4px 9px;font-size:12px;border-radius:6px}
+button.link{border:0;background:none;color:var(--accent);padding:0;font-weight:500}
+button:disabled{opacity:.45;cursor:default}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+input,select{font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:7px;padding:6px 9px;min-width:0}
+input[type=number]{font-family:var(--mono);width:74px}
+input[type=range]{accent-color:var(--accent)}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.hint{font-size:12px;color:var(--muted);margin:8px 0 0}
+.row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+
+/* top bar */
+.top{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--line);display:flex;flex-wrap:wrap;align-items:center;gap:10px 18px;padding:12px 0}
+.state{display:inline-flex;align-items:center;gap:7px;font-size:13px;color:var(--muted)}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px color-mix(in srgb,var(--ok) 25%,transparent)}
+.dot.paused{background:var(--warn);box-shadow:0 0 0 3px color-mix(in srgb,var(--warn) 25%,transparent)}
+.dot.running{background:var(--accent);animation:pulse 1.2s infinite}
+.dot.off{background:var(--faint);box-shadow:none}
+@keyframes pulse{50%{opacity:.35}}
+@media (prefers-reduced-motion:reduce){.dot.running{animation:none}}
+.spacer{flex:1}
+.top .actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.unsaved{font-size:12px;color:var(--warn);display:none}
+.unsaved.on{display:inline}
+
+/* page */
+.page{display:grid;grid-template-columns:304px minmax(0,1fr);gap:20px;margin-top:18px}
+@media (max-width:920px){.page{grid-template-columns:1fr}.rail{order:2}}
+.rail{display:flex;flex-direction:column;gap:14px;min-width:0}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:16px;box-shadow:var(--shadow);min-width:0}
+.kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.kpi{background:var(--panel-2);border-radius:8px;padding:10px 12px}
+.kpi .n{font-family:var(--mono);font-size:22px;font-weight:500;line-height:1.1}
+.kpi .l{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:3px}
+.country{display:grid;grid-template-columns:1fr auto auto;gap:4px 10px;align-items:center;padding:7px 0;border-bottom:1px solid var(--line-2)}
+.country:last-child{border-bottom:0}
+.country .name{font-weight:500}
+.country.off .name{color:var(--faint);text-decoration:line-through}
+.country input[type=range]{grid-column:1/-1;width:100%}
+.sw{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);cursor:pointer;white-space:nowrap}
+.sw input{accent-color:var(--accent);width:15px;height:15px;margin:0}
+.runs{display:flex;flex-direction:column;gap:6px;font-size:12px;margin-top:12px}
+.run{display:flex;justify-content:space-between;gap:8px;align-items:center}
+.run .st{font-weight:500}
+.run .st.success{color:var(--ok)}.run .st.failure{color:var(--bad)}.run .st.in_progress,.run .st.queued{color:var(--accent)}
+.keys label{display:block;font-size:12px;color:var(--muted);margin-top:8px}
+.keys input{width:100%;font-family:var(--mono);font-size:12px}
+details summary{cursor:pointer;color:var(--muted);font-size:12px;margin-top:6px}
+
+/* main */
+.seg{display:inline-flex;background:var(--panel-2);border-radius:9px;padding:3px;gap:3px;margin-bottom:12px}
+.seg button{border:0;background:transparent;border-radius:7px;padding:6px 12px;color:var(--muted)}
+.seg button.active{background:var(--panel);color:var(--ink);box-shadow:var(--shadow)}
+.seg .c{font-family:var(--mono);font-size:11px;margin-left:6px;color:var(--faint)}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin:0 0 14px;overflow-x:auto}
+.tab{background:none;border:0;border-bottom:2px solid transparent;border-radius:0;padding:10px 12px;color:var(--muted);font-weight:500;white-space:nowrap}
+.tab .c{font-family:var(--mono);font-size:11px;background:var(--panel-2);border-radius:999px;padding:1px 7px;margin-left:6px;color:var(--muted)}
+.tab.active{color:var(--ink);border-bottom-color:var(--accent)}
+.tab.active .c{background:var(--accent-soft);color:var(--accent)}
+.filters{display:grid;grid-template-columns:minmax(180px,1.4fr) repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:8px}
+.filters input,.filters select{width:100%;font-size:13px}
+.ms{position:relative}
+.ms>button{width:100%;text-align:left;font-weight:400;display:flex;justify-content:space-between;gap:6px;padding:6px 9px;font-size:13px}
+.ms>button .v{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ms>button .v.on{color:var(--accent);font-weight:500}
+.ms .menu{position:absolute;z-index:4;top:calc(100% + 4px);left:0;min-width:100%;background:var(--panel);border:1px solid var(--line);border-radius:8px;box-shadow:var(--shadow);padding:6px;display:none;max-height:260px;overflow:auto}
+.ms.open .menu{display:block}
+.ms .menu label{display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center;padding:5px 6px;border-radius:5px;font-size:13px;white-space:nowrap;cursor:pointer;text-align:left}
+.ms .menu label:hover{background:var(--panel-2)}
+.ms .menu input{accent-color:var(--accent);margin:0}
+.ms .menu .cnt{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--faint)}
+.chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:12px;min-height:22px}
+.chips .chip{cursor:pointer}
+.chips .chip:after{content:" ×";color:var(--faint)}
+.resultbar{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;font-size:12px;color:var(--muted)}
+.jobs{display:flex;flex-direction:column;gap:10px}
+.job{border:1px solid var(--line);border-radius:var(--r);background:var(--panel);padding:12px 14px;display:grid;grid-template-columns:52px minmax(0,1fr) auto;gap:6px 14px;align-items:start}
+.job.applied{border-left:3px solid var(--ok)}
+.job.archived{opacity:.72}
+.score{font-family:var(--mono);font-size:18px;font-weight:500;line-height:1;padding-top:3px}
+.score.hi{color:var(--ok)}.score.mid{color:var(--warn)}.score.lo{color:var(--muted)}
+.score small{display:block;font-size:10px;color:var(--faint);margin-top:4px;letter-spacing:.05em}
+.title{font-weight:600;font-size:15px;line-height:1.3;text-wrap:balance}
+.title a{color:var(--ink);text-decoration:none}
+.title a:hover{text-decoration:underline}
+.meta{color:var(--muted);font-size:12.5px;margin-top:3px;display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center}
+.meta .co{color:var(--ink)}
+.chip{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11px;font-weight:500;background:var(--panel-2);color:var(--muted);white-space:nowrap}
+.chip.src{background:var(--accent-soft);color:var(--accent)}
+.chip.cat{background:var(--warn-soft);color:var(--warn)}
+.chip.Applied{background:var(--ok-soft);color:var(--ok)}
+.chip.New{background:var(--accent-soft);color:var(--accent)}
+.ctrl{display:flex;flex-direction:column;gap:6px;min-width:160px}
+.ctrl select,.ctrl input{font-size:12.5px;padding:5px 7px}
+.ctrl .quick{display:flex;gap:6px}
+.pack{grid-column:1/-1;background:var(--panel-2);border-radius:8px;padding:12px 14px;margin-top:4px}
+.pack h4{margin:0 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);display:flex;align-items:center;gap:10px}
+.pack section{margin-bottom:12px}
+.pack pre{font-family:var(--sans);white-space:pre-wrap;margin:0;max-width:74ch;font-size:13.5px}
+.pack .why{font-size:12px;color:var(--muted)}
+@media (max-width:640px){.job{grid-template-columns:44px minmax(0,1fr)}.ctrl{grid-column:1/-1;flex-direction:row;flex-wrap:wrap}.ctrl select,.ctrl input{flex:1}}
+.empty{color:var(--muted);text-align:center;padding:34px 10px;border:1px dashed var(--line);border-radius:var(--r)}
+.toast{position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:9px 14px;border-radius:8px;font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none;max-width:90vw}
+.toast.show{opacity:1}
+
+/* setup */
+.setup{max-width:560px;margin:48px auto}
+.setup ol{padding-left:18px;color:var(--muted)}
+.setup input[type=password],.setup input[type=text]{width:100%;margin-top:4px}
+.setup label{font-size:12px;color:var(--muted);display:block;margin-top:10px}
+</style>
+</head>
+<body>
+
+<div class="top">
+  <h1><span class="logo"><svg width="16" height="16" viewBox="0 0 32 32" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 22h16M10 22V12l6-4 6 4v10"/></svg></span>Job Agent</h1>
+  <span class="state"><span id="dot" class="dot off"></span><span id="stateText">connecting…</span></span>
+  <span class="spacer"></span>
+  <div class="actions">
+    <span class="unsaved" id="unsaved">Unsaved changes</span>
+    <button id="saveAll" class="primary" disabled>Save</button>
+    <button id="refresh" class="ghost">Refresh</button>
+
+  </div>
+</div>
+
+<div class="page" id="page" hidden>
+  <aside class="rail">
+    <div class="card">
+      <div class="kpis">
+        <div class="kpi"><div class="n" id="kNew">–</div><div class="l">To apply</div></div>
+        <div class="kpi"><div class="n" id="kApplied">–</div><div class="l">Applied</div></div>
+        <div class="kpi"><div class="n" id="kTotal">–</div><div class="l">Tracked</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Agent</h2>
+      <div class="row">
+        <button id="runNow" class="primary">Search now</button>
+        <button id="schedBtn" data-on="">Daily search: …</button>
+      </div>
+      <p class="hint">A search takes 10–20 minutes. The daily search runs at 07:00 if this computer is on. <button class="link" id="openFolder">Open data folder</button><br><span class="mono" id="dataDir" style="font-size:11px"></span></p>
+      <div class="runs" id="runs"></div>
+    </div>
+    <div class="card">
+      <h2>Countries</h2>
+      <div id="countries"></div>
+      <p class="hint">Search finds jobs there · Apply writes application packs · slider = how much you want it.</p>
+    </div>
+    <div class="card">
+      <h2>Matching</h2>
+      <div class="row"><label for="minScore">Civil minimum score</label><input type="number" id="minScore" min="30" max="90" step="5"></div>
+      <div class="row" style="margin-top:8px"><label for="minScoreOther">Other roles minimum</label><input type="number" id="minScoreOther" min="30" max="90" step="5"></div>
+      <p class="hint">Below the minimum a job goes to Review instead of To apply. 55 balanced · 65 strict · 45 wide.</p>
+    </div>
+    <div class="card keys">
+      <h2>Job sources <span class="hint" style="margin:0;text-transform:none;letter-spacing:0">free keys</span></h2>
+      <p class="hint" style="margin:0">LinkedIn, SEEK and employer sites need no key. Jooble adds Bayt, GulfTalent and Naukrigulf listings for each Gulf country — one free key per country from <span class="mono">xx.jooble.org/api/about</span>.</p>
+      <div id="keysBox"></div>
+      <details><summary>Where are keys stored?</summary><p class="hint">In <span class="mono">data/keys.json</span> next to the app, saved with the Save button.</p></details>
+    </div>
+  </aside>
+
+  <main class="card">
+    <div class="seg" id="catSeg">
+      <button data-cat="civil" class="active">Civil engineering<span class="c" id="cCivil">0</span></button>
+      <button data-cat="other">Other roles<span class="c" id="cOther">0</span></button>
+    </div>
+    <div class="tabs" id="tabs">
+      <button class="tab active" data-tab="todo">To apply<span class="c" id="cTodo">0</span></button>
+      <button class="tab" data-tab="review">Review<span class="c" id="cReview">0</span></button>
+      <button class="tab" data-tab="applied">Applied<span class="c" id="cApplied">0</span></button>
+      <button class="tab" data-tab="archive">Archived<span class="c" id="cArchive">0</span></button>
+    </div>
+    <div class="filters">
+      <input type="text" id="fText" placeholder="Search title, company, location">
+      <div class="ms" id="msCountry"></div>
+      <div class="ms" id="msSource"></div>
+      <div class="ms" id="msRole"></div>
+      <select id="fDays"><option value="">Any date</option><option value="1">Today</option><option value="3">Last 3 days</option><option value="7">Last 7 days</option><option value="14">Last 14 days</option><option value="30">Last 30 days</option></select>
+      <select id="fScore"><option value="0">Any score</option><option value="55">Score ≥ 55</option><option value="65">Score ≥ 65</option><option value="75">Score ≥ 75</option><option value="85">Score ≥ 85</option></select>
+      <select id="fSort"><option value="score">Highest score</option><option value="date">Newest first</option><option value="company">Company A–Z</option><option value="country">Country</option></select>
+    </div>
+    <div class="chips" id="chips"></div>
+    <div class="resultbar"><span id="count"></span><span id="bulk"></span></div>
+    <div class="jobs" id="jobs"></div>
+    <div class="empty" id="empty" hidden></div>
+  </main>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  
+  const STATUSES = ["New","Review","Applied","Interview","Offer","Rejected","Skipped","Found (apply off)"];
+  const TAB_OF = s => ["Applied","Interview","Offer"].includes(s) ? "applied" : (s==="New" ? "todo" : (s==="Review" ? "review" : "archive"));
+  const FIELDS = ["found_date","score","verdict","title","company","location","country","source","url","status","applied_date","notes","pack_file","user_notes","category"];
+  const JOOBLE = [["sa","Saudi Arabia"],["ae","UAE"],["qa","Qatar"],["kw","Kuwait"],["om","Oman"],["ca","Canada"],["au","Australia"],["us","Global (jooble.org)"]];
+  
+  let profile=null, profileSha="", keys=null, keysSha="", tracker=[], edits={}, cat="civil", tab="todo", packCache={};
+  let dirty={profile:false, keys:false, tracker:false};
+  const filt = {text:"", countries:new Set(), sources:new Set(), roles:new Set(), days:"", score:0, sort:"score"};
+
+  // ---------- helpers
+  const toast = m => { const t=$("toast"); t.textContent=m; t.classList.add("show"); clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove("show"),2400); };
+  const esc = s => String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+  const b64d = s => decodeURIComponent(escape(atob(s.replace(/\n/g,""))));
+  const b64e = s => btoa(unescape(encodeURIComponent(s)));
+  const today = () => new Date().toISOString().slice(0,10);
+  async function api(path, body){ const r=await fetch(path, body?{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}:{}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error){ throw new Error(j.error||("HTTP "+r.status)); } return j; }
+  const getFile = async p => ({text:(await api("/api/file?path="+encodeURIComponent(p))).text, sha:""});
+  const putFile = async (p, text) => { await api("/api/file?path="+encodeURIComponent(p), {text}); return {content:{sha:""}}; };
+  function markDirty(k){ dirty[k]=true; $("unsaved").classList.add("on"); $("saveAll").disabled=false; }
+  function clearDirty(){ dirty={profile:false,keys:false,tracker:false}; $("unsaved").classList.remove("on"); $("saveAll").disabled=true; }
+  function setState(kind,text){ $("dot").className="dot "+kind; $("stateText").textContent=text; }
+
+  // ---------- CSV
+  function parseCSV(text){ const rows=[]; let row=[],f="",q=false; text=text.replace(/^\uFEFF/,""); for(let i=0;i<text.length;i++){const c=text[i]; if(q){ if(c==='"'){ if(text[i+1]==='"'){f+='"';i++;} else q=false; } else f+=c; } else if(c==='"') q=true; else if(c===','){row.push(f);f="";} else if(c==='\n'||c==='\r'){ if(c==='\r'&&text[i+1]==='\n') i++; row.push(f); rows.push(row); row=[]; f=""; } else f+=c; } if(f!==""||row.length){row.push(f);rows.push(row);} const h=rows.shift()||[]; return rows.filter(r=>r.length>1).map(r=>Object.fromEntries(h.map((k,i)=>[k,r[i]??""]))); }
+  function toCSV(rows){ const e=v=>{v=String(v??""); return /[",\n\r]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}; return "\uFEFF"+FIELDS.join(",")+"\n"+rows.map(r=>FIELDS.map(k=>e(r[k])).join(",")).join("\n")+"\n"; }
+
+  // ---------- load
+  async function loadAll(){
+    setState("running","loading…");
+    try{
+      const [pf, tr, kf] = await Promise.all([getFile("profile.json"), getFile("tracker.csv"), getFile("keys.json").catch(()=>({text:'{"jooble":{}}',sha:""}))]);
+      profile=JSON.parse(pf.text); profileSha=pf.sha; tracker=parseCSV(tr.text); keys=JSON.parse(kf.text); keysSha=kf.sha;
+      tracker.forEach(r=>{ r.category=r.category||"civil"; if(edits[r.url]) Object.assign(r, edits[r.url]); });
+      renderSettings(); renderKeys(); buildFilters(); renderJobs(); loadRuns();
+    }catch(e){ toast("Load failed: "+e.message); setState("off","app not reachable — start JobAgent"); }
+  }
+  let pollT=null;
+  async function loadRuns(){
+    const paused = !!(profile&&profile.search&&profile.search.paused);
+    try{
+      const s=await api("/api/status");
+      $("runs").innerHTML = (s.running?`<div class="run"><span class="mono">now</span><span class="st in_progress">searching…</span></div><div class="hint" style="margin:4px 0 8px;font-family:var(--mono);font-size:11px">${esc((s.log||[]).slice(-3).join("\n"))}</div>`:"") +
+        (s.runs||[]).map(r=>`<div class="run"><span class="mono">${esc(r.at.slice(0,16).replace("T"," "))}</span><span class="st success" title="${esc(r.summary)}">${esc(r.summary.replace(/^\S+:\s*/,"").split(",")[0])}</span></div>`).join("");
+      $("schedBtn").textContent = s.scheduled ? "Daily search: ON (07:00)" : "Daily search: OFF";
+      $("schedBtn").dataset.on = s.scheduled ? "1" : "";
+      $("dataDir").textContent = s.data_dir||"";
+      setState(s.running?"running":"ok", s.running?"search in progress":"ready");
+      if(s.running){ clearTimeout(pollT); pollT=setTimeout(loadRuns,2000); } else if(pollT){ clearTimeout(pollT); pollT=null; await loadAll(); }
+    }catch(e){ setState("off","app not reachable — start JobAgent"); }
+  }
+  // ---------- settings
+  function renderSettings(){
+    const box=$("countries"); box.innerHTML="";
+    const cs=profile.search.countries;
+    Object.keys(cs).filter(k=>!k.startsWith("_")).forEach(name=>{
+      const c=cs[name]; const row=document.createElement("div"); row.className="country"+(c.search?"":" off");
+      row.innerHTML=`<span class="name">${esc(name)}</span>
+        <label class="sw"><input type="checkbox" data-k="search" ${c.search?"checked":""}> Search</label>
+        <label class="sw"><input type="checkbox" data-k="apply" ${c.apply?"checked":""} ${c.search?"":"disabled"}> Apply</label>
+        <input type="range" min="0.3" max="1" step="0.05" value="${c.weight??1}" title="Weight ${c.weight??1}">`;
+      row.querySelectorAll("input[type=checkbox]").forEach(i=>i.addEventListener("change",()=>{ c[i.dataset.k]=i.checked; if(i.dataset.k==="search"&&!i.checked) c.apply=false; markDirty("profile"); renderSettings(); }));
+      row.querySelector("input[type=range]").addEventListener("input",e=>{ c.weight=+e.target.value; e.target.title="Weight "+c.weight; markDirty("profile"); });
+      box.appendChild(row);
+    });
+    $("minScore").value=profile.search.min_score??55; $("minScoreOther").value=profile.search.min_score_other??60;
+  }
+  $("minScore").addEventListener("input",()=>{ profile.search.min_score=+$("minScore").value||55; markDirty("profile"); });
+  $("minScoreOther").addEventListener("input",()=>{ profile.search.min_score_other=+$("minScoreOther").value||60; markDirty("profile"); });
+  function renderKeys(){
+    const box=$("keysBox"); box.innerHTML=""; keys.jooble=keys.jooble||{};
+    JOOBLE.forEach(([cc,label])=>{
+      const l=document.createElement("label"); l.innerHTML=`Jooble ${esc(label)} <input type="text" placeholder="key from ${cc==="us"?"":cc+"."}jooble.org" value="${esc(keys.jooble[cc]||"")}" autocomplete="off" spellcheck="false">`;
+      l.querySelector("input").addEventListener("input",e=>{ keys.jooble[cc]=e.target.value.trim(); markDirty("keys"); });
+      box.appendChild(l);
+    });
+  }
+  $("runNow").addEventListener("click",async()=>{ try{ await api("/api/run",{}); toast("Search started"); setTimeout(loadRuns,800); }catch(e){ toast("Could not start: "+e.message); } });
+  $("schedBtn").addEventListener("click",async()=>{ const on=!$("schedBtn").dataset.on; try{ const r=await api("/api/schedule",{enable:on,hour:7}); toast(r.scheduled?"Daily search at 07:00 is on":"Daily search is off"); if(r.message&&!r.scheduled&&on) toast(r.message); loadRuns(); }catch(e){ toast("Could not change: "+e.message); } });
+  $("openFolder").addEventListener("click",()=>api("/api/open-folder",{}).catch(()=>{}));
+  // ---------- filters
+  function multi(id,label,values,set){
+    const el=$(id); el.className="ms"; el.innerHTML=`<button type="button"><span class="v">${label}</span><span>▾</span></button><div class="menu"></div>`;
+    const menu=el.querySelector(".menu"); const btn=el.querySelector("button");
+    const paint=()=>{ const v=btn.querySelector(".v"); if(set.size){v.textContent=[...set].join(", "); v.classList.add("on");} else {v.textContent=label; v.classList.remove("on");} };
+    el.redraw=(counts)=>{ menu.innerHTML=values.map(v=>`<label><input type="checkbox" value="${esc(v)}" ${set.has(v)?"checked":""}> ${esc(v)}<span class="cnt">${counts[v]||0}</span></label>`).join("")||'<span class="hint">—</span>';
+      menu.querySelectorAll("input").forEach(i=>i.addEventListener("change",()=>{ i.checked?set.add(i.value):set.delete(i.value); paint(); renderJobs(); })); paint(); };
+    btn.addEventListener("click",e=>{ e.stopPropagation(); document.querySelectorAll(".ms.open").forEach(x=>x!==el&&x.classList.remove("open")); el.classList.toggle("open"); });
+    menu.addEventListener("click",e=>e.stopPropagation());
+  }
+  document.addEventListener("click",()=>document.querySelectorAll(".ms.open").forEach(x=>x.classList.remove("open")));
+  function buildFilters(){
+    const uniq=k=>[...new Set(tracker.map(r=>r[k]).filter(Boolean))].sort();
+    multi("msCountry","All countries",uniq("country"),filt.countries);
+    multi("msSource","All sources",uniq("source"),filt.sources);
+    multi("msRole","All role types",[...new Set(tracker.map(r=>roleLabel(r.category)))].sort(),filt.roles);
+  }
+  const roleLabel = c => c==="civil"?"Civil engineering":((profile.categories||{})[c]||{}).label||c;
+  const chipsOf=()=>{ const out=[]; filt.countries.forEach(v=>out.push(["countries",v])); filt.sources.forEach(v=>out.push(["sources",v])); filt.roles.forEach(v=>out.push(["roles",v])); if(filt.days) out.push(["days","Last "+filt.days+" day"+(filt.days==="1"?"":"s")]); if(filt.score) out.push(["score","Score ≥ "+filt.score]); if(filt.text) out.push(["text","“"+filt.text+"”"]); return out; };
+  ["fText","fDays","fScore","fSort"].forEach(id=>$(id).addEventListener("input",()=>{ filt.text=$("fText").value.trim(); filt.days=$("fDays").value; filt.score=+$("fScore").value; filt.sort=$("fSort").value; renderJobs(); }));
+
+  // ---------- jobs
+  function renderJobs(){
+    const inCat = r => (cat==="civil") ? (r.category||"civil")==="civil" : (r.category||"civil")!=="civil";
+    const counts={todo:0,review:0,applied:0,archive:0}; let civil=0, other=0;
+    tracker.forEach(r=>{ ((r.category||"civil")==="civil")?civil++:other++; if(inCat(r)) counts[TAB_OF(r.status)]++; });
+    $("cCivil").textContent=civil; $("cOther").textContent=other;
+    $("cTodo").textContent=counts.todo; $("cReview").textContent=counts.review; $("cApplied").textContent=counts.applied; $("cArchive").textContent=counts.archive;
+    $("kNew").textContent=tracker.filter(r=>r.status==="New").length; $("kApplied").textContent=tracker.filter(r=>["Applied","Interview","Offer"].includes(r.status)).length; $("kTotal").textContent=tracker.length;
+    const base=tracker.filter(r=>inCat(r)&&TAB_OF(r.status)===tab);
+    const cutoff = filt.days ? new Date(Date.now()-(+filt.days-1)*86400000).toISOString().slice(0,10) : "";
+    const q=filt.text.toLowerCase();
+    const pass = r => (!filt.countries.size||filt.countries.has(r.country)) && (!filt.sources.size||filt.sources.has(r.source)) && (!filt.roles.size||filt.roles.has(roleLabel(r.category))) && (!cutoff||(r.found_date||"")>=cutoff) && (+r.score>=filt.score) && (!q||(r.title+" "+r.company+" "+r.location).toLowerCase().includes(q));
+    const list=base.filter(pass);
+    // facet counts within the current tab/category
+    const cnt=k=>base.reduce((m,r)=>{const v=k==="role"?roleLabel(r.category):r[k]; m[v]=(m[v]||0)+1; return m;},{});
+    $("msCountry").redraw(cnt("country")); $("msSource").redraw(cnt("source")); $("msRole").redraw(cnt("role"));
+    const sorters={score:(a,b)=>(+b.score)-(+a.score)||(b.found_date||"").localeCompare(a.found_date||""), date:(a,b)=>(b.found_date||"").localeCompare(a.found_date||"")||(+b.score)-(+a.score), company:(a,b)=>a.company.localeCompare(b.company)||(+b.score)-(+a.score), country:(a,b)=>(a.country||"").localeCompare(b.country||"")||(+b.score)-(+a.score)};
+    list.sort(sorters[filt.sort]||sorters.score);
+    $("chips").innerHTML=chipsOf().map(([k,v])=>`<span class="chip" data-k="${k}" data-v="${esc(v)}">${esc(v)}</span>`).join("")+(chipsOf().length?' <button class="link small" id="clearF">Clear all</button>':"");
+    $("chips").querySelectorAll(".chip").forEach(c=>c.addEventListener("click",()=>{ const k=c.dataset.k; if(filt[k] instanceof Set) filt[k].delete(c.dataset.v); else { filt[k]= (k==="score"?0:""); if(k==="text")$("fText").value=""; if(k==="days")$("fDays").value=""; if(k==="score")$("fScore").value="0"; } renderJobs(); }));
+    const cl=$("clearF"); if(cl) cl.addEventListener("click",()=>{ filt.countries.clear(); filt.sources.clear(); filt.roles.clear(); filt.days=""; filt.score=0; filt.text=""; $("fText").value=""; $("fDays").value=""; $("fScore").value="0"; renderJobs(); });
+    $("count").textContent = `${list.length} of ${base.length} in this list · ${tracker.length} tracked`;
+    $("bulk").innerHTML = (tab==="todo"&&list.length) ? `<button class="link small" id="skipAll">Skip all shown</button>` : "";
+    const sk=$("skipAll"); if(sk) sk.addEventListener("click",()=>{ list.forEach(r=>edit(r,{status:"Skipped"})); renderJobs(); toast(`${list.length} moved to Archived — press Save`); });
+    const box=$("jobs"); box.innerHTML="";
+    $("empty").hidden=list.length>0;
+    $("empty").textContent = base.length ? "No jobs match these filters." : (tracker.length ? {todo:"Nothing waiting here. New matches arrive with the next run.",review:"No jobs in review.",applied:"Set a job to Applied and it moves here.",archive:"Nothing archived."}[tab] : "No jobs yet. Press Run now, or wait for the 07:00 run.");
+    list.forEach(r=>{
+      const el=document.createElement("article"); el.className="job"+(TAB_OF(r.status)==="applied"?" applied":"")+(tab==="archive"?" archived":"");
+      const sc=+r.score; const cls=sc>=70?"hi":(sc>=55?"mid":"lo");
+      el.innerHTML=`<div class="score ${cls}">${sc}<small>SCORE</small></div>
+        <div>
+          <div class="title"><a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.title)}</a></div>
+          <div class="meta"><span class="co">${esc(r.company)}</span><span>${esc(r.location||r.country)}</span><span class="mono">${esc(r.found_date)}</span><span class="chip src">${esc(r.source)}</span>${cat==="other"?`<span class="chip cat">${esc(roleLabel(r.category))}</span>`:""}${r.applied_date?`<span class="chip Applied">applied ${esc(r.applied_date)}</span>`:""}</div>
+        </div>
+        <div class="ctrl">
+          <select class="st">${STATUSES.map(s=>`<option ${s===r.status?"selected":""}>${s}</option>`).join("")}</select>
+          <input class="notes" type="text" placeholder="Your note" value="${esc(r.user_notes||"")}">
+          <div class="quick">${tab==="todo"?'<button class="small primary mark">Mark applied</button><button class="small skip">Skip</button>':""}${r.pack_file?'<button class="small pack-btn">Pack</button>':""}</div>
+        </div>`;
+      box.appendChild(el);
+      const setStatus=s=>{ edit(r,{status:s, applied_date:s==="Applied"?(r.applied_date||today()):(r.applied_date||"")}); renderJobs(); toast(s==="Applied"?"Moved to Applied — press Save":"Status set — press Save"); };
+      el.querySelector("select.st").addEventListener("change",e=>setStatus(e.target.value));
+      const mk=el.querySelector(".mark"); if(mk) mk.addEventListener("click",()=>setStatus("Applied"));
+      const skp=el.querySelector(".skip"); if(skp) skp.addEventListener("click",()=>setStatus("Skipped"));
+      let t; el.querySelector("input.notes").addEventListener("input",e=>{clearTimeout(t); t=setTimeout(()=>edit(r,{user_notes:e.target.value}),400);});
+      const pb=el.querySelector(".pack-btn"); if(pb) pb.addEventListener("click",()=>togglePack(el,r,pb));
+    });
+  }
+  function edit(r,patch){ Object.assign(r,patch); edits[r.url]={...(edits[r.url]||{}),...patch}; markDirty("tracker"); }
+  async function togglePack(el,r,btn){
+    let p=el.querySelector(".pack"); if(p){p.remove();btn.textContent="Pack";return;}
+    btn.disabled=true;
+    try{
+      if(!packCache[r.pack_file]) packCache[r.pack_file]=(await getFile(r.pack_file)).text;
+      const md=packCache[r.pack_file];
+      const sec=n=>{const m=md.match(new RegExp("## "+n.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+"\\n+([\\s\\S]*?)(?=\\n## |$)"));return m?m[1].trim():"";};
+      const summary=sec("CV summary for this application"), letter=sec("Cover letter"), ans=sec("Draft screening answers");
+      const answers=[...ans.matchAll(/\*\*Q:\*\* (.+?)\n\*\*A:\*\* ([\s\S]+?)(?=\n\n\*\*Q|\s*$)/g)].map(m=>({q:m[1].trim(),a:m[2].trim()}));
+      p=document.createElement("div"); p.className="pack";
+      p.innerHTML=`<section><h4>CV summary <button class="small copy" data-t="s">Copy</button></h4><pre data-s>${esc(summary)}</pre></section>
+        <section><h4>Cover letter <button class="small copy" data-t="l">Copy</button></h4><pre data-l>${esc(letter)}</pre></section>
+        ${answers.length?`<section><h4>Screening answers</h4>${answers.map((a,i)=>`<pre data-a${i}><b>Q:</b> ${esc(a.q)}\n<b>A:</b> ${esc(a.a)}</pre><button class="small copy" data-t="a${i}" data-ans="${esc(a.a)}" style="margin:4px 0 10px">Copy answer</button>`).join("")}</section>`:""}
+        <div class="why">Why it matched: ${esc(r.notes)}</div>`;
+      el.appendChild(p); btn.textContent="Close";
+      p.querySelectorAll("button.copy").forEach(b=>b.addEventListener("click",()=>{ const txt=b.dataset.ans ?? (p.querySelector(`pre[data-${b.dataset.t}]`)||{}).textContent ?? ""; navigator.clipboard.writeText(txt).then(()=>toast("Copied")).catch(()=>toast("Copy blocked — select the text")); }));
+    }catch(e){ toast("Pack unavailable: "+e.message); }
+    btn.disabled=false;
+  }
+
+  // ---------- save everything in one go
+  async function saveAll(){
+    $("saveAll").disabled=true; const done=[];
+    try{
+      if(dirty.tracker){ const fresh=await getFile("tracker.csv"); const rows=parseCSV(fresh.text); rows.forEach(r=>{ r.category=r.category||"civil"; if(edits[r.url]) Object.assign(r,edits[r.url]); }); await putFile("tracker.csv", toCSV(rows), fresh.sha, "Statuses from control page"); tracker=rows; edits={}; done.push("tracker"); }
+      if(dirty.profile){ const r=await putFile("profile.json", JSON.stringify(profile,null,2)+"\n", profileSha, "Settings from control page"); profileSha=r.content.sha; done.push("settings"); }
+      if(dirty.keys){ const r=await putFile("keys.json", JSON.stringify(keys,null,2)+"\n", keysSha, "API keys from control page"); keysSha=r.content.sha; done.push("keys"); }
+      clearDirty(); renderJobs(); toast("Saved "+done.join(", "));
+    }catch(e){ toast("Save failed: "+e.message+(e.status===409?" — reloading":"")); $("saveAll").disabled=false; if(e.status===409) loadAll(); }
+  }
+  $("saveAll").addEventListener("click",saveAll);
+  $("refresh").addEventListener("click",loadAll);
+  $("tabs").addEventListener("click",e=>{ const b=e.target.closest(".tab"); if(!b) return; tab=b.dataset.tab; document.querySelectorAll(".tab").forEach(x=>x.classList.toggle("active",x===b)); try{localStorage.setItem("ja-tab",tab);}catch(_){} renderJobs(); });
+  $("catSeg").addEventListener("click",e=>{ const b=e.target.closest("button"); if(!b) return; cat=b.dataset.cat; document.querySelectorAll("#catSeg button").forEach(x=>x.classList.toggle("active",x===b)); try{localStorage.setItem("ja-cat",cat);}catch(_){} renderJobs(); });
+  window.addEventListener("beforeunload",e=>{ if(dirty.tracker||dirty.profile||dirty.keys){e.preventDefault();e.returnValue="";} });
+
+  (function boot(){
+    try{ const t=localStorage.getItem("ja-tab"); if(t){tab=t; document.querySelectorAll(".tab").forEach(x=>x.classList.toggle("active",x.dataset.tab===t));}
+      const c=localStorage.getItem("ja-cat"); if(c){cat=c; document.querySelectorAll("#catSeg button").forEach(x=>x.classList.toggle("active",x.dataset.cat===c));} }catch(_){}
+    $("page").hidden=false; loadAll();
+  })();
+})();
+</script>
+</body>
+</html>

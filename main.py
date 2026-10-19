@@ -38,10 +38,14 @@ def main() -> int:
     # 1. search
     raw = fetch_all(SOURCES, PROFILE)
     unique: dict[str, dict] = {}
+    seen_tc: set[str] = set()
     for j in raw:
         k = dedupe_key(j)
-        if k and k not in unique:
+        tc = (j["title"].lower().strip() + "|" + j["company"].lower().strip()) if j["company"] != "Unknown" else ""
+        if k and k not in unique and (not tc or tc not in seen_tc):
             unique[k] = j
+            if tc:
+                seen_tc.add(tc)
     log(f"Collected {len(raw)} rows, {len(unique)} unique")
 
     # 2. first-pass score on title + snippet, then fetch full text for the promising ones and rescore
