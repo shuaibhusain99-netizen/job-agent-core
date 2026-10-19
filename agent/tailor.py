@@ -36,7 +36,7 @@ def summary(j: dict, profile: dict) -> str:
     focus = ", ".join(theme_txt.get(t, t) for t in themes)
     return (f"Civil Engineer with {c['years_experience']}+ years of site and contract experience in Bahrain, focused on {focus}. "
             f"Currently {c['current_role']}. NEBOSH IGC certified; {c['degree']}. "
-            f"{c['nationality']}, open to relocation across the GCC.")
+            f"{c['nationality']}, open to relocation across the GCC and Canada.")
 
 
 def cover_letter(j: dict, profile: dict) -> str:
