@@ -36,7 +36,7 @@ def summary(j: dict, profile: dict) -> str:
     focus = ", ".join(theme_txt.get(t, t) for t in themes)
     return (f"Civil Engineer with {c['years_experience']}+ years of site and contract experience in Bahrain, focused on {focus}. "
             f"Currently {c['current_role']}. NEBOSH IGC certified; {c['degree']}. "
-            f"{c['nationality']}, open to relocation across the GCC and Canada.")
+            f"Open to relocation.")
 
 
 def cover_letter(j: dict, profile: dict) -> str:
@@ -48,7 +48,7 @@ def cover_letter(j: dict, profile: dict) -> str:
     return (
         f"{date.today():%d %B %Y}\n\n"
         f"Dear Hiring Manager,\n\n"
-        f"I am applying for the {j['title']} position with {company} in {loc}. I am a Bahraini civil engineer with "
+        f"I am applying for the {j['title']} position with {company} in {loc}. I am a civil engineer with "
         f"{c['years_experience']} years of site and contract experience on water-network, roads and airport infrastructure, "
         f"and I hold the NEBOSH International General Certificate.\n\n"
         f"{body}\n\n"
@@ -64,10 +64,9 @@ GCC = {"Saudi Arabia", "United Arab Emirates", "Qatar", "Kuwait", "Oman", "Bahra
 def _authorisation_line(j: dict, c: dict) -> str:
     country = j.get("country") or "the GCC"
     if country in GCC or country == "the GCC":
-        return (f"As a GCC national I can take up a position in {country} without visa sponsorship and am eligible "
+        return (f"I am based in Bahrain, can relocate to {country} at short notice and am eligible "
                 f"for Saudi Council of Engineers registration.")
-    return (f"I am a Bahraini national and would need employer-supported work authorisation for {country}; "
-            f"I am ready to relocate and to pursue the local engineering licensing route (EIT/P.Eng.) on arrival.")
+    return (f"I am ready to relocate to {country} and to pursue the local engineering licensing route (EIT/P.Eng.) on arrival.")
 
 
 QUESTION_RE = re.compile(r"([A-Z][^.?!]{15,160}\?)")
