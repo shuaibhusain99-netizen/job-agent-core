@@ -83,3 +83,6 @@ tracker.csv          running record of every relevant job found
 applications/        one markdown pack per match
 reports/             daily CSV of everything relevant that run
 ```
+
+## Control panel (claude.ai)
+A private page "Job Agent Control" holds the settings (country search/apply switches, minimum score, pause, run now) and the tracker with packs. A daily scheduled task in Claude (07:30 Riyadh) runs `sync/sync_tool.py`: it applies the panel's settings to `profile.json` (and dispatches a run if "Run now" was pressed), merges status edits back into `tracker.csv`, and loads new jobs and packs into the panel.
