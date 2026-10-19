@@ -1,0 +1,1 @@
+{"_comment":"Free API keys the agent uses. This repo is private. Jooble keys are per country site: request each at https://<cc>.jooble.org/api/about (sa, ae, qa, kw, om, ca, au) and paste here or in the control page.","jooble":{"us":"","sa":"","ae":"","qa":"","kw":"","om":"","bh":"","ca":"","au":""}}
