@@ -1,0 +1,54 @@
+{
+  "_comment": "Job sources. Everything here is free. Keys marked (optional) need a free API key stored as a GitHub secret - see README.",
+
+  "jooble": {
+    "_comment": "Free aggregator API covering Bayt, GulfTalent, Naukrigulf, Indeed etc. Get a key at https://jooble.org/api/about and store it as secret JOOBLE_API_KEY. Locations are passed per country from profile.json.",
+    "enabled": true,
+    "pages_per_query": 2
+  },
+
+  "google_alerts_rss": {
+    "_comment": "Optional. Create Google Alerts (https://www.google.com/alerts) delivered as RSS feed and paste the feed URLs here. Free catch-all for LinkedIn/Bayt/company postings Google indexes.",
+    "enabled": true,
+    "feeds": []
+  },
+
+  "gulftalent": {
+    "_comment": "Best effort HTML. Blocked from some datacenter IPs (403); skipped automatically when blocked.",
+    "enabled": true,
+    "country_slugs": {"Saudi Arabia": "saudi-arabia", "United Arab Emirates": "uae", "Qatar": "qatar", "Kuwait": "kuwait", "Oman": "oman", "Bahrain": "bahrain"},
+    "title_slugs": ["civil-engineer", "site-engineer", "project-engineer", "qa-qc-engineer", "infrastructure-engineer", "water-engineer"]
+  },
+
+  "linkedin_guest": {
+    "_comment": "Best effort. LinkedIn's public guest listing endpoint; frequently rate-limited. Skipped automatically on challenge.",
+    "enabled": true
+  },
+
+  "workday": {
+    "_comment": "Employer career sites on Workday. tenant / host / site verified from the employer's careers URL: https://<tenant>.<host>.myworkdayjobs.com/<site>",
+    "boards": [
+      {"company": "Parsons", "tenant": "parsons", "host": "wd5", "site": "Search"},
+      {"company": "KBR", "tenant": "kbr", "host": "wd5", "site": "KBR_Careers"}
+    ]
+  },
+
+  "successfactors": {
+    "_comment": "SAP SuccessFactors career sites (search page HTML). base = site root, slug = path segment.",
+    "boards": [
+      {"company": "alfanar", "base": "https://jobs.alfanar.com", "slug": "alfanar"}
+    ]
+  },
+
+  "workable": {
+    "_comment": "Workable accounts (apply.workable.com/<account>). Rate-limited; the agent backs off.",
+    "accounts": [
+      {"company": "Eram Talent", "account": "eramtalent-1"},
+      {"company": "CBS", "account": "cbs-9"}
+    ]
+  },
+
+  "greenhouse": {"boards": []},
+  "lever": {"boards": []},
+  "smartrecruiters": {"companies": []}
+}
