@@ -380,6 +380,22 @@
         "drawings"
       ],
       "text": "I work in AutoCAD and Civil 3D for shop and as-built drawings, have STAAD Pro training, and use MS Project for programmes and Excel for quantity and progress tracking."
+    },
+    "inventory_materials": {
+      "triggers": [
+        "inventory",
+        "stock",
+        "materials",
+        "warehouse",
+        "storekeeper",
+        "procurement",
+        "supply",
+        "logistics",
+        "asset",
+        "fleet",
+        "equipment"
+      ],
+      "text": "On the EWA maintenance contract I plan and control the materials, equipment and manpower behind every repair order, keep the depot's material and fleet records current, and built the Excel and Power Apps tools the team uses for stock, fleet and BOQ tracking, so material control and accurate records are part of my daily routine."
     }
   },
   "screening_answers": {

@@ -96,7 +96,6 @@ def main() -> int:
         print("\n(dry run: tracker and sheet not updated)")
         return 0
     tracker.save(TRACKER, known)
-    tracker.push_to_sheet(new_rows)
     # expose counts to the workflow for the run summary
     gh = os.getenv("GITHUB_OUTPUT")
     if gh:

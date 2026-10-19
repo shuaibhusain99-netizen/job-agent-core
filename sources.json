@@ -1,23 +1,18 @@
 {
   "_comment": "Job sources. Everything here is free. Keys marked (optional) need a free API key stored as a GitHub secret - see README.",
   "jooble": {
-    "_comment": "Free aggregator API (Bayt, GulfTalent, Naukrigulf, Indeed...). Key = secret JOOBLE_API_KEY. Keys have a request quota (default 500), so queries/pages are kept small: requests per run = len(queries) x countries x pages. 'countries' limits which profile countries are queried (this key's coverage is strong for Canada, weak for the GCC).",
+    "_comment": "Keys live in keys.json (one per country site). Countries without a key fall back to the global jooble.org key, limited to global_key_countries.",
     "enabled": true,
     "queries": [
       "civil engineer",
       "site engineer",
-      "QA/QC civil engineer"
+      "QA/QC engineer"
     ],
-    "pages_per_query": 1,
-    "max_requests_per_run": 25,
-    "countries": [
+    "pages_per_query": 2,
+    "max_requests_per_run": 120,
+    "global_key_countries": [
       "Canada"
     ]
-  },
-  "google_alerts_rss": {
-    "_comment": "Optional. Create Google Alerts (https://www.google.com/alerts) delivered as RSS feed and paste the feed URLs here. Free catch-all for LinkedIn/Bayt/company postings Google indexes.",
-    "enabled": true,
-    "feeds": []
   },
   "gulftalent": {
     "_comment": "Best effort HTML. Blocked from some datacenter IPs (403); skipped automatically when blocked.",
@@ -43,7 +38,7 @@
     "_comment": "LinkedIn public listings, all countries. pages x queries x countries requests; polite delay. Skips the rest of a country on a challenge.",
     "enabled": true,
     "pages": 3,
-    "days": 7
+    "days": 14
   },
   "workday": {
     "_comment": "Employer career sites on Workday. tenant / host / site verified from the employer's careers URL: https://<tenant>.<host>.myworkdayjobs.com/<site>",
@@ -106,6 +101,10 @@
       "water engineer",
       "roads engineer"
     ],
-    "pages": 3
+    "pages": 4
+  },
+  "google_alerts_rss": {
+    "enabled": false,
+    "feeds": []
   }
 }

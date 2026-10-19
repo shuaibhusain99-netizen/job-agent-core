@@ -4,28 +4,47 @@ import json, os, re, time
 from urllib.parse import quote, quote_plus, urljoin
 from xml.etree import ElementTree as ET
 
+from pathlib import Path
 from .util import http, http_json, job, clean, log, guess_country, countries
 
 
 # ---------------------------------------------------------------- Jooble (free API key)
+JOOBLE_SITES = {"Saudi Arabia": "sa", "United Arab Emirates": "ae", "Qatar": "qa", "Kuwait": "kw", "Oman": "om",
+                "Bahrain": "bh", "Canada": "ca", "Australia": "au"}
+
+
+def load_keys() -> dict:
+    try:
+        return json.loads((Path(__file__).resolve().parents[1] / "keys.json").read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
 def fetch_jooble(cfg: dict, profile: dict) -> list[dict]:
-    key = os.getenv("JOOBLE_API_KEY", "").strip()
-    if not cfg.get("enabled") or not key:
-        log("Jooble: skipped (no JOOBLE_API_KEY secret)")
+    """Jooble has one API key per country site (sa.jooble.org, ae.jooble.org ...). keys.json → jooble.<cc>.
+    The global jooble.org key (keys.json → jooble.us, or env JOOBLE_API_KEY) is used for countries without their own key."""
+    if not cfg.get("enabled"):
         return []
+    keys = (load_keys().get("jooble") or {})
+    global_key = (keys.get("us") or os.getenv("JOOBLE_API_KEY", "")).strip()
     out = []
-    budget = cfg.get("max_requests_per_run", 25)
+    budget = cfg.get("max_requests_per_run", 60)
     used = 0
     for country in countries(profile):
-        if cfg.get("countries") and country not in cfg["countries"]:
-            continue
+        cc = JOOBLE_SITES.get(country, "")
+        key = (keys.get(cc) or "").strip()
+        host = f"{cc}.jooble.org" if key else "jooble.org"
+        if not key:
+            key = global_key
+            if not key or (cfg.get("global_key_countries") and country not in cfg["global_key_countries"]):
+                continue
         for q in cfg.get("queries") or profile["search"]["queries"]:
             for page in range(1, cfg.get("pages_per_query", 1) + 1):
                 if used >= budget:
                     break
                 used += 1
-                status, data = http_json(f"https://jooble.org/api/{key}",
-                                         {"keywords": q, "location": country, "page": page})
+                status, data = http_json(f"https://{host}/api/{key}",
+                                         {"keywords": q, "location": "" if host != "jooble.org" else country, "page": page})
                 if status != 200 or not data:
                     break
                 rows = data.get("jobs", [])
@@ -105,7 +124,7 @@ def fetch_linkedin(cfg: dict, profile: dict) -> list[dict]:
     tpr = f"r{int(cfg.get('days', 7)) * 86400}"
     for country in countries(profile):
         country_hits = 0
-        for q in profile["search"]["queries"]:
+        for q in profile["search"]["queries"] + profile["search"].get("queries_other", []):
             for page in range(pages):
                 url = ("https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?"
                        f"keywords={quote_plus(q)}&location={quote_plus(country)}&f_TPR={tpr}&start={page * 25}")
@@ -162,7 +181,7 @@ def fetch_seek(cfg: dict, profile: dict) -> list[dict]:
     if not cfg.get("enabled") or "Australia" not in countries(profile):
         return []
     out, seen = [], set()
-    for q in cfg.get("queries", ["civil engineer"]):
+    for q in cfg.get("queries", ["civil engineer"]) + profile["search"].get("queries_other", []):
         for page in range(1, int(cfg.get("pages", 2)) + 1):
             url = ("https://www.seek.com.au/api/jobsearch/v5/search?siteKey=AU-Main&sourcesystem=houston"
                    f"&keywords={quote_plus(q)}&page={page}&pageSize=50&locale=en-AU&sortmode=ListedDate")
