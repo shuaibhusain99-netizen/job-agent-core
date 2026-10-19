@@ -24,22 +24,36 @@ def required_years(text: str) -> tuple[int | None, int | None]:
 
 
 def score(j: dict, profile: dict) -> tuple[int, str, list[str]]:
-    """Returns (score, verdict, reasons). verdict: 'apply' | 'maybe' | 'reject'."""
+    """Score against every category, keep the best. Sets j["category"].
+    Returns (score, verdict, reasons). verdict: 'apply' | 'maybe' | 'reject'."""
+    best = None
+    cats = {"civil": {"target_titles": profile["target_titles"], "keyword_points": profile["keyword_points"]}}
+    for key, c in profile.get("categories", {}).items():
+        if not key.startswith("_"):
+            cats[key] = c
+    for key, c in cats.items():
+        s, v, r = _score_one(j, profile, key, c["target_titles"], c["keyword_points"])
+        if best is None or s > best[0]:
+            best = (s, v, r, key)
+    j["category"] = best[3]
+    return best[0], best[1], best[2]
+
+
+def _score_one(j: dict, profile: dict, cat: str, target_titles: list, keyword_points: dict) -> tuple[int, str, list[str]]:
     title = j["title"].lower()
     text = (j["title"] + " " + j["description"]).lower()
-    reasons: list[str] = []
+    reasons: list[str] = [f"category:{cat}"]
     pts = 0
 
     # 1. Title match (the strongest signal)
-    if any(t in title for t in profile["target_titles"]):
+    if any(t in title for t in target_titles):
         pts += 40
         reasons.append("target title")
-    elif "engineer" in title:
+    elif cat == "civil" and "engineer" in title:
         pts += 15
         reasons.append("engineer title")
     else:
-        pts -= 20
-        reasons.append("non-engineer title")
+        return 0, "reject", reasons + ["title not in category"]
 
     # 2. Title penalties (seniority, discipline, nationality restrictions)
     for term, pen in profile["title_penalties"].items():
@@ -69,7 +83,7 @@ def score(j: dict, profile: dict) -> tuple[int, str, list[str]]:
     # 5. Keyword points (capped so a long description can't dominate)
     kw = 0
     hits = []
-    for term, p in profile["keyword_points"].items():
+    for term, p in keyword_points.items():
         if re.search(r"(?<![a-z])" + re.escape(term) + r"(?![a-z])", text):
             kw += p
             hits.append(term)
@@ -100,5 +114,6 @@ def score(j: dict, profile: dict) -> tuple[int, str, list[str]]:
         reasons.append("wants local candidates")
 
     s = max(0, min(100, pts))
-    verdict = "apply" if s >= profile["search"]["min_score"] else ("maybe" if s >= profile["search"]["min_score"] - 15 else "reject")
+    threshold = profile["search"]["min_score"] if cat == "civil" else profile["search"].get("min_score_other", profile["search"]["min_score"] + 5)
+    verdict = "apply" if s >= threshold else ("maybe" if s >= threshold - 15 else "reject")
     return s, verdict, reasons
