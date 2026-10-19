@@ -18,9 +18,9 @@ jobs:
       - name: Build JobAgent.exe
         run: >
           pyinstaller --onefile --noconsole --name JobAgent --clean
-          --add-data "panel_local.html;." --add-data "profile.json;." --add-data "keys.json;." --add-data "sources.json;."
+          --add-data "panel_local.html;." --add-data "agent/filler.js;agent" --add-data "profile.json;." --add-data "keys.json;." --add-data "sources.json;."
           --hidden-import main --hidden-import agent --hidden-import agent.sources --hidden-import agent.score
-          --hidden-import agent.tailor --hidden-import agent.tracker --hidden-import agent.util
+          --hidden-import agent.tailor --hidden-import agent.tracker --hidden-import agent.util --hidden-import agent.browser
           app.py
       - name: Smoke test
         shell: pwsh

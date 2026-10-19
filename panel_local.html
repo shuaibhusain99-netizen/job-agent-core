@@ -200,6 +200,7 @@ details summary{cursor:pointer;color:var(--muted);font-size:12px;margin-top:6px}
     </div>
     <div class="card mail-set">
       <h2>E-mail applications</h2>
+      <p class="hint" style="margin:0 0 4px"><b>Apply on site</b> opens the job in a separate browser window (your Edge/Chrome, own profile — sign in to LinkedIn, Bayt etc. once and it stays signed in), fills the form from your profile and attaches the CV below; you check it and press the site's own Submit. A small JobAgent bar on the page has <i>Fill again</i> and <i>I submitted ✓</i>.</p>
       <p class="hint" style="margin:0 0 4px">Ads that say "send your CV to …" get a <b>Send application</b> button. The e-mail goes from your own address with your CV attached; a copy is kept in <span class="mono">data/sent</span>.</p>
       <label>Mail provider</label><select id="mPreset"><option value="gmail">Gmail</option><option value="outlook">Outlook.com / Hotmail</option><option value="office365">Microsoft 365 (work)</option><option value="yahoo">Yahoo</option><option value="">Other (SMTP below)</option></select>
       <div id="mCustom" hidden><label>SMTP server</label><input id="mHost" placeholder="smtp.example.com"><label>Port</label><input id="mPort" value="587"></div>
@@ -390,7 +391,7 @@ details summary{cursor:pointer;color:var(--muted);font-size:12px;margin-top:6px}
         <div class="ctrl">
           <select class="st">${STATUSES.map(s=>`<option ${s===r.status?"selected":""}>${s}</option>`).join("")}</select>
           <input class="notes" type="text" placeholder="Your note" value="${esc(r.user_notes||"")}">
-          <div class="quick">${r.apply_email&&TAB_OF(r.status)!=="applied"?'<button class="small primary send">Send application</button>':""}${tab==="todo"?'<button class="small mark">Mark applied</button><button class="small skip">Skip</button>':""}${r.pack_file?'<button class="small pack-btn">Pack</button>':""}</div>
+          <div class="quick">${r.apply_email&&TAB_OF(r.status)!=="applied"?'<button class="small primary send">Send application</button>':""}${TAB_OF(r.status)!=="applied"?'<button class="small '+(r.apply_email?"":"primary")+' site" title="Opens the job in the apply window and fills the form for you">Apply on site</button>':""}${tab==="todo"?'<button class="small mark">Mark applied</button><button class="small skip">Skip</button>':""}${r.pack_file?'<button class="small pack-btn">Pack</button>':""}</div>
         </div>`;
       box.appendChild(el);
       const setStatus=s=>{ edit(r,{status:s, applied_date:s==="Applied"?(r.applied_date||today()):(r.applied_date||"")}); renderJobs(); toast(s==="Applied"?"Moved to Applied — press Save":"Status set — press Save"); };
@@ -400,6 +401,7 @@ details summary{cursor:pointer;color:var(--muted);font-size:12px;margin-top:6px}
       let t; el.querySelector("input.notes").addEventListener("input",e=>{clearTimeout(t); t=setTimeout(()=>edit(r,{user_notes:e.target.value}),400);});
       const pb=el.querySelector(".pack-btn"); if(pb) pb.addEventListener("click",()=>togglePack(el,r,pb));
       const sb=el.querySelector(".send"); if(sb) sb.addEventListener("click",()=>openSend(r));
+      const ab=el.querySelector(".site"); if(ab) ab.addEventListener("click",async()=>{ ab.disabled=true; ab.textContent="Opening…"; try{ const res=await api("/api/apply-site",{url:r.url}); toast(res.ok?("Apply window opened"+(res.cv?"":" — no CV attached yet (add it in e-mail settings)")):(res.error||"Could not open")); watchApply(r); }catch(e){ toast("Could not open: "+e.message); } ab.disabled=false; ab.textContent="Apply on site"; });
     });
   }
   function edit(r,patch){ Object.assign(r,patch); edits[r.url]={...(edits[r.url]||{}),...patch}; markDirty("tracker"); }
@@ -450,6 +452,15 @@ details summary{cursor:pointer;color:var(--muted);font-size:12px;margin-top:6px}
       try{ const res=await api("/api/send",{url:r.url,to:m.querySelector("#sTo").value.trim(),subject:m.querySelector("#sSub").value.trim(),body:m.querySelector("#sBody").value});
         if(res.ok){ toast("Sent to "+res.to); m.remove(); Object.assign(r,{status:"Applied",applied_date:r.applied_date||today()}); renderJobs(); } else { toast(res.error||"Not sent"); b.disabled=false; b.textContent="Send"; } }
       catch(e){ toast("Not sent: "+e.message); b.disabled=false; b.textContent="Send"; } });
+  }
+
+  let applyT=null;
+  function watchApply(r){
+    clearTimeout(applyT);
+    const tick=async()=>{ try{ const s=await api("/api/apply-status"); const st=s[r.url]; if(!st) return; const last=st.log[st.log.length-1]||""; if(last) setState("running","apply window: "+last);
+        if(st.stopped||/submitted|marked/.test(last)){ setState("ok","ready"); const fresh=await getFile("tracker.csv"); const row=parseCSV(fresh.text).find(x=>x.url===r.url); if(row&&row.status!==r.status){ Object.assign(r,{status:row.status,applied_date:row.applied_date}); renderJobs(); toast("Marked as "+row.status); } return; }
+        applyT=setTimeout(tick,3000); }catch(_){ } };
+    applyT=setTimeout(tick,2500);
   }
 
   // ---------- save everything in one go

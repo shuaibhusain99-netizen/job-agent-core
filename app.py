@@ -254,6 +254,44 @@ def send_application(url: str, to: str, subject: str, body: str) -> dict:
     return {"ok": True, "to": msg["To"], "saved": f"sent/{stamp}_{safe}.eml"}
 
 
+# ----------------------------------------------------------------------------- apply on site (browser helper)
+APPLY: dict[str, object] = {}
+
+
+def apply_on_site(url: str) -> dict:
+    from agent import browser
+    row = next((r for r in tracker_rows() if r.get("url") == url), None)
+    if not row:
+        raise ValueError("job not in tracker")
+    profile = json.loads((DATA / "profile.json").read_text(encoding="utf-8"))
+    job = dict(row)
+    try:
+        job["cover_letter"] = draft_email(row)["body"]
+    except Exception:
+        job["cover_letter"] = ""
+    old = APPLY.get(url)
+    if old and not old.stop:
+        return {"ok": True, "message": "already open in the apply window"}
+    cv = DATA / "CV.pdf"
+    sess = browser.ApplySession(url, profile, job, cv if cv.exists() else None, f"http://127.0.0.1:{PORT}", profile_dir=DATA / "browser")
+    APPLY[url] = sess
+    return {"ok": True, "message": "opened in the apply window", "cv": cv.exists()}
+
+
+def mark_status(url: str, status: str) -> dict:
+    rows = tracker_rows()
+    hit = False
+    for r in rows:
+        if r.get("url") == url:
+            hit = True
+            r["status"] = status
+            if status == "Applied":
+                r["applied_date"] = r.get("applied_date") or datetime.now().date().isoformat()
+    if hit:
+        tracker_write(rows)
+    return {"ok": hit}
+
+
 # ----------------------------------------------------------------------------- HTTP
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):  # quiet
@@ -264,6 +302,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.end_headers()
         self.wfile.write(body)
 
@@ -273,6 +314,9 @@ class Handler(BaseHTTPRequestHandler):
     def _safe(self, rel: str) -> Path | None:
         p = (DATA / rel).resolve()
         return p if str(p).startswith(str(DATA.resolve())) else None
+
+    def do_OPTIONS(self):
+        self._send(204, b"")
 
     def do_GET(self):
         u = urlparse(self.path); q = parse_qs(u.query)
@@ -291,6 +335,8 @@ class Handler(BaseHTTPRequestHandler):
                                "runs": [{"at": a, "summary": b} for a, b in reversed(runs)], "scheduled": schedule_status(), "data_dir": str(DATA)})
         if u.path == "/api/mail":
             return self._json(mail_public())
+        if u.path == "/api/apply-status":
+            return self._json({u_: {"stopped": s_.stop, "log": s_.log[-5:]} for u_, s_ in APPLY.items()})
         if u.path == "/api/draft":
             url = q.get("url", [""])[0]
             row = next((r for r in tracker_rows() if r.get("url") == url), None)
@@ -346,6 +392,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(send_application(d["url"], d["to"], d["subject"], d["body"]))
             except Exception as e:
                 return self._json({"ok": False, "error": f"{type(e).__name__}: {e}"})
+        if u.path == "/api/apply-site":
+            d = json.loads(body or b"{}")
+            try:
+                return self._json(apply_on_site(d["url"]))
+            except Exception as e:
+                return self._json({"ok": False, "error": f"{type(e).__name__}: {e}"})
+        if u.path == "/api/mark":
+            d = json.loads(body or b"{}")
+            return self._json(mark_status(d.get("url", ""), d.get("status", "Applied")))
         if u.path == "/api/open-folder":
             try:
                 if os.name == "nt": os.startfile(DATA)  # type: ignore[attr-defined]

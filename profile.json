@@ -716,5 +716,27 @@
         "\\bsaudi arabian oil\\b"
       ]
     }
+  },
+  "form_answers": {
+    "_comment": "Used by 'Apply on site' to fill application forms. Edit freely; blank = leave the field for you.",
+    "first_name": "Shuaib",
+    "last_name": "Husain Abbas",
+    "nationality": "Bahraini",
+    "region": "Capital Governorate",
+    "address": "Sitra, Bahrain",
+    "postal_code": "",
+    "linkedin": "",
+    "current_title": "Project Engineer",
+    "current_company": "Al Door Excavation & Building Contracting",
+    "notice_text": "30 days",
+    "expected_salary": "Negotiable",
+    "current_salary": "",
+    "university": "University of Bahrain",
+    "degree_short": "Bachelor's degree",
+    "grad_year": "2021",
+    "gpa": "3.17",
+    "gender": "",
+    "dob": "",
+    "sce_registered": "No"
   }
 }
