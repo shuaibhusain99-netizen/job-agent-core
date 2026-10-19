@@ -22,7 +22,22 @@ def load(path: Path) -> dict[str, dict]:
         return {r["url"]: r for r in csv.DictReader(f) if r.get("url")}
 
 
+KEEP_DAYS = 90
+KEEP_STATUSES = {"Applied", "Interview", "Offer", "New", "Review"}
+
+
+def prune(rows: dict[str, dict]) -> int:
+    """Drop rejected/skipped/apply-off rows older than KEEP_DAYS so the tracker stays small."""
+    from datetime import timedelta
+    cutoff = (date.today() - timedelta(days=KEEP_DAYS)).isoformat()
+    old = [u for u, r in rows.items() if r.get("status") not in KEEP_STATUSES and (r.get("found_date") or "") < cutoff]
+    for u in old:
+        rows.pop(u, None)
+    return len(old)
+
+
 def save(path: Path, rows: dict[str, dict]) -> None:
+    prune(rows)
     with path.open("w", encoding="utf-8-sig", newline="") as f:
         w = csv.DictWriter(f, fieldnames=FIELDS, extrasaction="ignore")
         w.writeheader()
