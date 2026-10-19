@@ -1,11 +1,11 @@
 # Civil Engineer Job Agent
 
-A free, daily job agent for Shuaib's GCC civil-engineering search. Every morning it:
+A free, daily job agent for Shuaib's civil-engineering search across the GCC, Canada and Australia. Every morning it:
 
 1. **Searches** Saudi Arabia, UAE, Qatar, Kuwait, Oman, Bahrain and Canada for Civil / Site / Project / QA-QC / Infrastructure / Water engineer roles across job boards and employer career sites.
 2. **Matches** each posting to `profile.json` — your real experience, skills and certificates — and scores it 0-100 with the reasons shown. Roles asking 7+ years, nationals-only, other disciplines or management level are rejected automatically.
 3. **Prepares** an application pack for every match: a tailored CV summary, a cover letter built only from factual CV blocks, and draft answers to the posting's screening questions.
-4. **Tracks** everything in `tracker.csv` (committed to the repo) and mirrors new rows to your Google Sheet, where you update the status as you apply.
+4. **Tracks** everything in `tracker.csv` (committed to the repo), which the control page shows and edits.
 
 Cost: zero. Standard-library Python only, runs on GitHub Actions' free tier.
 
@@ -15,7 +15,8 @@ Cost: zero. Standard-library Python only, runs on GitHub Actions' free tier.
 
 | Source | Needs | Notes |
 |---|---|---|
-| Jooble API | free key (`JOOBLE_API_KEY`) | Aggregates Bayt, GulfTalent, Naukrigulf, Indeed and company sites across all 6 countries. **Set this up — it is the main feed.** |
+| Jooble API | free key (`JOOBLE_API_KEY`) | Canada aggregator (this key's coverage is weak for the Gulf). |
+| SEEK | nothing | Australia's main board, public API. |
 | LinkedIn public listings | nothing | Covers every country incl. Canada. Works most days; LinkedIn sometimes rate-limits cloud IPs, in which case it's skipped for that run. |
 | Workday career sites (Parsons, KBR, …) | nothing | Reliable. Add more employers in `sources.json`. |
 | SuccessFactors (alfanar, …) | nothing | Reliable. Add more in `sources.json`. |
@@ -34,15 +35,7 @@ Cost: zero. Standard-library Python only, runs on GitHub Actions' free tier.
 1. Go to https://jooble.org/api/about and request a key (instant, email confirmation).
 2. Repo → Settings → Secrets and variables → Actions → **New repository secret**: `JOOBLE_API_KEY` = the key.
 
-### 3. Google Sheet tracker (3 minutes)
-1. Create a Google Sheet called e.g. *Job Applications*. Rename the first tab to `Applications`.
-2. Extensions → Apps Script. Delete the sample code, paste in `apps_script.gs`, change `TOKEN` to any long random string, save.
-3. Deploy → New deployment → type **Web app** → Execute as **Me** → Who has access **Anyone** → Deploy → authorise → copy the **Web app URL**.
-4. Add two more repo secrets: `SHEET_WEBHOOK_URL` = that URL, `SHEET_WEBHOOK_TOKEN` = your token.
-
-Without step 3 the agent still works; `tracker.csv` in the repo is the record.
-
-### 4. First run
+### 3. First run
 Actions tab → **Daily job agent** → Run workflow. Open the run → the summary shows the day's list; the `job-report` artifact has the CSV and the application packs; `tracker.csv` and `applications/` are committed to the repo. From then on it runs daily at 07:00 Riyadh time.
 
 ### Optional: Google Alerts
@@ -84,5 +77,5 @@ applications/        one markdown pack per match
 reports/             daily CSV of everything relevant that run
 ```
 
-## Control panel (claude.ai)
-A private page "Job Agent Control" holds the settings (country search/apply switches, minimum score, pause, run now) and the tracker with packs. A daily scheduled task in Claude (07:30 Riyadh) runs `sync/sync_tool.py`: it applies the panel's settings to `profile.json` (and dispatches a run if "Run now" was pressed), merges status edits back into `tracker.csv`, and loads new jobs and packs into the panel.
+## Control page
+https://shuaibhusain99-netizen.github.io/civil-engineer-job-agent/ — settings (countries, score, pause, run now) and the tracker (To apply / Review / Applied / Archived) with application packs. It talks to this repository from your browser with a fine-grained GitHub token (Contents + Actions read/write) that stays on your device.
