@@ -63,10 +63,7 @@ GCC = {"Saudi Arabia", "United Arab Emirates", "Qatar", "Kuwait", "Oman", "Bahra
 
 def _authorisation_line(j: dict, c: dict) -> str:
     country = j.get("country") or "the GCC"
-    if country in GCC or country == "the GCC":
-        return (f"I am based in Bahrain, can relocate to {country} at short notice and am eligible "
-                f"for Saudi Council of Engineers registration.")
-    return (f"I am ready to relocate to {country} and to pursue the local engineering licensing route (EIT/P.Eng.) on arrival.")
+    return f"I am ready to relocate to {country}."
 
 
 QUESTION_RE = re.compile(r"([A-Z][^.?!]{15,160}\?)")

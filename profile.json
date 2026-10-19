@@ -11,7 +11,7 @@
     "years_experience": 4,
     "experience_start": "2021-11",
     "current_role": "Project Engineer, Al Door Excavation & Building Contracting (EWA Water Distribution Directorate emergency repair contract)",
-    "notice_period": "1 month",
+    "notice_period": "30 days",
     "certifications": [
       "NEBOSH IGC",
       "IOSH Working Safely",
@@ -364,7 +364,7 @@
     "_comment": "Pattern (regex, case-insensitive) -> factual answer. Used to pre-draft answers to common application questions.",
     "degree|bachelor|qualification": "Yes - B.Sc. Civil Engineering, University of Bahrain (2017-2021), GPA 3.17/4.0.",
     "years? of experience|how many years|experience level": "4 years of civil engineering experience (Nov 2021 - present): water-network maintenance, roads and infrastructure, and airfield works in Bahrain.",
-    "notice|availability|start date|join": "Notice period 1 month; can join within 30 days of offer.",
+    "notice|availability|start date|join": "30 days' notice; can join within 30 days of offer.",
     "relocat|willing to work|based in|onsite|on-site|shift": "Yes - willing to relocate and to work on site and on shifts.",
     "saudi council|sce|license|licence|registration": "Eligible for Saudi Council of Engineers registration; registration can be completed on appointment.",
     "salary|expected|compensation": "Open to discussion in line with the role and market; happy to share expectations at interview.",
@@ -374,7 +374,6 @@
     "road|highway|asphalt|infrastructure": "Yes - road, bridge, storm-water and asphalt works for Bapco, Wadi Al Buhair and Al Dur IWPP (Sayed Kadhem Aldurazi & Sons), including road-closure and traffic-management plans.",
     "qa/?qc|quality|inspection": "Yes - QA/QC procedures, inspection requests and monthly quantity reports on airfield works at Bahrain International Airport; quality verification of excavation, pipe repairs, backfill and asphalt reinstatement on the EWA contract.",
     "driving|licen[cs]e": "Valid Bahrain driving licence.",
-    "arabic|language": "Arabic native, English fluent.",
-    "visa|sponsor|work permit|iqama": "Eligible to work in the GCC; will support any work-permit process required."
+    "arabic|language": "Arabic native, English fluent."
   }
 }
