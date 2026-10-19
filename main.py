@@ -27,7 +27,7 @@ PACKS = ROOT / "applications"
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry", action="store_true", help="don't write tracker/sheet")
-    ap.add_argument("--max-enrich", type=int, default=60, help="how many top candidates get full descriptions fetched")
+    ap.add_argument("--max-enrich", type=int, default=150, help="how many top candidates get full descriptions fetched")
     args = ap.parse_args()
     REPORTS.mkdir(exist_ok=True)
     PACKS.mkdir(exist_ok=True)

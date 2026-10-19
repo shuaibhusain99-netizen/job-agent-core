@@ -100,28 +100,40 @@ def fetch_gulftalent(cfg: dict, profile: dict) -> list[dict]:
 def fetch_linkedin(cfg: dict, profile: dict) -> list[dict]:
     if not cfg.get("enabled"):
         return []
-    out, challenged = [], False
+    out, challenged = [], 0
+    pages = int(cfg.get("pages", 3))
+    tpr = f"r{int(cfg.get('days', 7)) * 86400}"
     for country in countries(profile):
-        if challenged:
-            break
-        for q in profile["search"]["queries"][:4]:
-            url = ("https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?"
-                   f"keywords={quote_plus(q)}&location={quote_plus(country)}&f_TPR=r604800&start=0")
-            status, body = http(url)
-            if status != 200 or "base-card" not in body:
-                challenged = True
+        country_hits = 0
+        for q in profile["search"]["queries"]:
+            for page in range(pages):
+                url = ("https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?"
+                       f"keywords={quote_plus(q)}&location={quote_plus(country)}&f_TPR={tpr}&start={page * 25}")
+                status, body = http(url)
+                if status != 200 or "base-card" not in body:
+                    challenged += 1
+                    break
+                cards = re.findall(r"<li>[\s\S]*?</li>", body)
+                for card in cards:
+                    t = re.search(r'base-search-card__title">\s*([^<]+)', card)
+                    c = re.search(r'class="hidden-nested-link"[^>]*>\s*([^<]+)', card)
+                    l = re.search(r'job-search-card__location">\s*([^<]+)', card)
+                    u = re.search(r'href="(https://[^"?]+)', card)
+                    d = re.search(r'datetime="([^"]+)"', card)
+                    if t and u:
+                        out.append(job(t.group(1), c.group(1) if c else "", l.group(1) if l else country,
+                                       u.group(1), "", "LinkedIn", country, d.group(1) if d else ""))
+                        country_hits += 1
+                time.sleep(1.2)
+                if len(cards) < 25:
+                    break
+            if challenged >= 3:
                 break
-            for card in re.findall(r"<li>[\s\S]*?</li>", body):
-                t = re.search(r'base-search-card__title">\s*([^<]+)', card)
-                c = re.search(r'class="hidden-nested-link"[^>]*>\s*([^<]+)', card)
-                l = re.search(r'job-search-card__location">\s*([^<]+)', card)
-                u = re.search(r'href="(https://[^"?]+)', card)
-                d = re.search(r'datetime="([^"]+)"', card)
-                if t and u:
-                    out.append(job(t.group(1), c.group(1) if c else "", l.group(1) if l else country,
-                                   u.group(1), "", "LinkedIn", country, d.group(1) if d else ""))
-            time.sleep(1.5)
-    log(f"LinkedIn: {'challenged - skipped' if challenged else f'{len(out)} rows'}")
+        log(f"LinkedIn {country}: {country_hits} rows")
+        if challenged >= 3:
+            log("LinkedIn: challenged repeatedly - stopping early")
+            break
+    log(f"LinkedIn: {len(out)} rows total")
     return out
 
 
@@ -143,6 +155,36 @@ def enrich_linkedin(j: dict) -> None:
         if t:
             j["company"] = clean(t.group(1))
     time.sleep(1.2)
+
+
+# ---------------------------------------------------------------- SEEK (Australia, public API)
+def fetch_seek(cfg: dict, profile: dict) -> list[dict]:
+    if not cfg.get("enabled") or "Australia" not in countries(profile):
+        return []
+    out, seen = [], set()
+    for q in cfg.get("queries", ["civil engineer"]):
+        for page in range(1, int(cfg.get("pages", 2)) + 1):
+            url = ("https://www.seek.com.au/api/jobsearch/v5/search?siteKey=AU-Main&sourcesystem=houston"
+                   f"&keywords={quote_plus(q)}&page={page}&pageSize=50&locale=en-AU&sortmode=ListedDate")
+            status, data = http_json(url)
+            if status != 200 or not data:
+                log(f"SEEK: HTTP {status} on '{q}' p{page}")
+                break
+            rows = data.get("data", [])
+            for r in rows:
+                jid = str(r.get("id"))
+                if jid in seen:
+                    continue
+                seen.add(jid)
+                loc = ", ".join(x.get("label", "") for x in (r.get("locations") or [])) or "Australia"
+                desc = " ".join([r.get("teaser", "")] + (r.get("bulletPoints") or []) + [r.get("salaryLabel", "") or ""])
+                out.append(job(r.get("title"), (r.get("advertiser") or {}).get("description") or r.get("companyName"),
+                               loc, f"https://www.seek.com.au/job/{jid}", desc, "SEEK", "Australia", (r.get("listingDate") or "")[:10]))
+            if len(rows) < 50:
+                break
+            time.sleep(0.6)
+    log(f"SEEK: {len(out)} rows")
+    return out
 
 
 # ---------------------------------------------------------------- Workday (employer ATS, reliable)
@@ -336,7 +378,7 @@ def enrich(j: dict) -> None:
 def fetch_all(sources: dict, profile: dict) -> list[dict]:
     fetchers = [
         ("jooble", fetch_jooble), ("google_alerts_rss", fetch_rss), ("gulftalent", fetch_gulftalent),
-        ("linkedin_guest", fetch_linkedin), ("workday", fetch_workday), ("successfactors", fetch_successfactors),
+        ("linkedin_guest", fetch_linkedin), ("seek", fetch_seek), ("workday", fetch_workday), ("successfactors", fetch_successfactors),
         ("workable", fetch_workable), ("greenhouse", fetch_greenhouse), ("lever", fetch_lever),
         ("smartrecruiters", fetch_smartrecruiters),
     ]
