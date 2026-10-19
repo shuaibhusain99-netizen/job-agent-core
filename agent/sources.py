@@ -13,9 +13,12 @@ JOOBLE_SITES = {"Saudi Arabia": "sa", "United Arab Emirates": "ae", "Qatar": "qa
                 "Bahrain": "bh", "Canada": "ca", "Australia": "au"}
 
 
+KEYS_PATH = Path(__file__).resolve().parents[1] / "keys.json"
+
+
 def load_keys() -> dict:
     try:
-        return json.loads((Path(__file__).resolve().parents[1] / "keys.json").read_text(encoding="utf-8"))
+        return json.loads(KEYS_PATH.read_text(encoding="utf-8"))
     except Exception:
         return {}
 
