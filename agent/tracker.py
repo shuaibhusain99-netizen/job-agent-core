@@ -12,7 +12,7 @@ from pathlib import Path
 from .util import http, log
 
 FIELDS = ["found_date", "score", "verdict", "title", "company", "location", "country", "source",
-          "url", "status", "applied_date", "notes", "pack_file"]
+          "url", "status", "applied_date", "notes", "pack_file", "user_notes"]
 
 
 def load(path: Path) -> dict[str, dict]:
@@ -36,7 +36,7 @@ def row_from_job(j: dict) -> dict:
         "title": j["title"], "company": j["company"], "location": j["location"], "country": j.get("country", ""),
         "source": j["source"], "url": j["url"],
         "status": {"apply": "New", "found": "Found (apply off)"}.get(j["verdict"], "Review"), "applied_date": "", "notes": j["reasons"][:200],
-        "pack_file": j.get("pack_file", ""),
+        "pack_file": j.get("pack_file", ""), "user_notes": "",
     }
 
 
