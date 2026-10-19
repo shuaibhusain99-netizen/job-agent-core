@@ -37,7 +37,7 @@
   "linkedin_guest": {
     "_comment": "LinkedIn public listings, all countries. pages x queries x countries requests; polite delay. Skips the rest of a country on a challenge.",
     "enabled": true,
-    "pages": 3,
+    "pages": 2,
     "days": 14
   },
   "workday": {
@@ -54,6 +54,12 @@
         "tenant": "kbr",
         "host": "wd5",
         "site": "KBR_Careers"
+      },
+      {
+        "company": "Baker Hughes",
+        "tenant": "bakerhughes",
+        "host": "wd5",
+        "site": "BakerHughes"
       }
     ]
   },
@@ -64,6 +70,11 @@
         "company": "alfanar",
         "base": "https://jobs.alfanar.com",
         "slug": "alfanar"
+      },
+      {
+        "company": "Halliburton",
+        "base": "https://jobs.halliburton.com",
+        "slug": ""
       }
     ]
   },
@@ -106,5 +117,42 @@
   "google_alerts_rss": {
     "enabled": false,
     "feeds": []
+  },
+  "rigzone": {
+    "_comment": "Rigzone - the main oil & gas job board. Free, no key. pages x queries x countries requests.",
+    "enabled": true,
+    "pages": 2,
+    "queries": [
+      "civil engineer",
+      "site engineer",
+      "graduate engineer",
+      "field engineer",
+      "construction engineer",
+      "HSE officer",
+      "QA/QC inspector"
+    ]
+  },
+  "newspapers": {
+    "_comment": "Sites that republish the Gulf newspapers' recruitment pages (Assignments Abroad Times, Gulf Job Paper ...). WordPress search API, no key. Country is guessed from the ad text.",
+    "days": 14,
+    "per_query": 20,
+    "queries": [
+      "civil engineer",
+      "site engineer",
+      "graduate engineer",
+      "trainee engineer",
+      "oil gas civil",
+      "HSE officer",
+      "safety officer",
+      "storekeeper",
+      "quantity surveyor",
+      "document controller"
+    ],
+    "sites": [
+      {
+        "name": "Gulf Job Paper",
+        "base": "https://www.gulfjobpaper.com"
+      }
+    ]
   }
 }

@@ -16,6 +16,17 @@ JOOBLE_SITES = {"Saudi Arabia": "sa", "United Arab Emirates": "ae", "Qatar": "qa
 KEYS_PATH = Path(__file__).resolve().parents[1] / "keys.json"
 
 
+def all_queries(profile: dict) -> list[str]:
+    """civil + other + oil & gas search phrases, de-duplicated, order kept."""
+    sp = profile["search"]
+    out, seen = [], set()
+    for q in sp["queries"] + sp.get("queries_other", []) + sp.get("queries_oilgas", []):
+        if q.lower() not in seen:
+            seen.add(q.lower())
+            out.append(q)
+    return out
+
+
 def load_keys() -> dict:
     try:
         return json.loads(KEYS_PATH.read_text(encoding="utf-8"))
@@ -127,7 +138,7 @@ def fetch_linkedin(cfg: dict, profile: dict) -> list[dict]:
     tpr = f"r{int(cfg.get('days', 7)) * 86400}"
     for country in countries(profile):
         country_hits = 0
-        for q in profile["search"]["queries"] + profile["search"].get("queries_other", []):
+        for q in all_queries(profile):
             for page in range(pages):
                 url = ("https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?"
                        f"keywords={quote_plus(q)}&location={quote_plus(country)}&f_TPR={tpr}&start={page * 25}")
@@ -184,7 +195,7 @@ def fetch_seek(cfg: dict, profile: dict) -> list[dict]:
     if not cfg.get("enabled") or "Australia" not in countries(profile):
         return []
     out, seen = [], set()
-    for q in cfg.get("queries", ["civil engineer"]) + profile["search"].get("queries_other", []):
+    for q in cfg.get("queries", ["civil engineer"]) + profile["search"].get("queries_other", []) + profile["search"].get("queries_oilgas", []):
         for page in range(1, int(cfg.get("pages", 2)) + 1):
             url = ("https://www.seek.com.au/api/jobsearch/v5/search?siteKey=AU-Main&sourcesystem=houston"
                    f"&keywords={quote_plus(q)}&page={page}&pageSize=50&locale=en-AU&sortmode=ListedDate")
@@ -274,7 +285,7 @@ def fetch_successfactors(cfg: dict, profile: dict) -> list[dict]:
     for b in cfg.get("boards", []):
         seen = set()
         for q in ["civil", "site engineer", "project engineer", "QA/QC", "infrastructure"]:
-            url = f"{b['base']}/{b['slug']}/search/?q={quote_plus(q)}&locationsearch="
+            url = f"{b['base']}/{b['slug']}/search/?q={quote_plus(q)}&locationsearch=" if b.get("slug") else f"{b['base']}/search/?q={quote_plus(q)}&locationsearch="
             status, body = http(url)
             if status != 200:
                 log(f"SuccessFactors {b['company']}: HTTP {status}")
@@ -383,8 +394,117 @@ def fetch_smartrecruiters(cfg: dict, profile: dict) -> list[dict]:
     return out
 
 
+
+
+
+# ---------------------------------------------------------------- Rigzone (oil & gas job board, free)
+RIGZONE_COUNTRIES = {"Saudi Arabia": "Saudi Arabia", "United Arab Emirates": "United Arab Emirates", "Qatar": "Qatar",
+                     "Kuwait": "Kuwait", "Oman": "Oman", "Bahrain": "Bahrain", "Canada": "Canada", "Australia": "Australia"}
+
+
+def fetch_rigzone(cfg: dict, profile: dict) -> list[dict]:
+    """Rigzone search (the same JSON call its page makes). ~20 rows per page, IndustryExp = years asked for."""
+    if not cfg.get("enabled"):
+        return []
+    out, seen = [], set()
+    pages = int(cfg.get("pages", 2))
+    for country in countries(profile):
+        rc = RIGZONE_COUNTRIES.get(country)
+        if not rc:
+            continue
+        for q in cfg.get("queries") or ["civil engineer", "site engineer", "graduate engineer", "field engineer", "HSE officer"]:
+            for page in range(1, pages + 1):
+                form = (f"sk={quote_plus(q)}&sl={quote_plus(rc)}&country={quote_plus(rc)}&page={page}&radius=155&unit=MI"
+                        "&region=0&category=0&emptype=0&experience=0&skill=0&ll=&state=&IsAjaxCallJobSearch=true")
+                status, body = http("https://www.rigzone.com/oil/jobs/searchAjax", data=form.encode(),
+                                    headers={"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"})
+                if status != 200 or not body:
+                    log(f"Rigzone: HTTP {status} on '{q}' {country}")
+                    break
+                try:
+                    data = json.loads(body)
+                except ValueError:
+                    break
+                rows = data.get("SolrJobs") or []
+                for r in rows:
+                    pid = r.get("PostingID")
+                    if not pid or pid in seen:
+                        continue
+                    seen.add(pid)
+                    loc = clean(r.get("JobLocation", "")).replace(" ", " ")
+                    exp = r.get("IndustryExp") or 0
+                    desc = clean(r.get("JobDescription", ""))
+                    if exp:
+                        desc += f" Experience asked: {exp}+ years."
+                    posted = ""
+                    try:
+                        from datetime import datetime
+                        posted = datetime.strptime(r.get("PostedDate", ""), "%B %d, %Y").date().isoformat()
+                    except Exception:
+                        pass
+                    out.append(job(r.get("JobTitle"), r.get("CompanyName"), loc, "https://www.rigzone.com" + r.get("PostingUrl", ""),
+                                   desc, "Rigzone", guess_country(loc) or country, posted))
+                if len(rows) < 20 or page * 20 >= int(data.get("NumFound") or 0):
+                    break
+                time.sleep(0.6)
+    log(f"Rigzone: {len(out)} rows")
+    return out
+
+
+def enrich_rigzone(j: dict) -> None:
+    status, body = http(j["url"])
+    if status == 200:
+        m = re.search(r'<div[^>]+class="[^"]*job-description[^"]*"[^>]*>([\s\S]*?)</div>\s*</div>', body) or \
+            re.search(r'<section[^>]+id="job-description"[^>]*>([\s\S]*?)</section>', body) or \
+            re.search(r'<div class="description">([\s\S]*?)</div>\s*</article>', body)
+        if m:
+            j["description"] = clean(m.group(1))[:6000]
+
+
+# ---------------------------------------------------------------- Newspaper job ads (WordPress sites that republish Gulf newspaper vacancies)
+def fetch_wordpress(cfg: dict, profile: dict) -> list[dict]:
+    """Sites built on WordPress expose /wp-json/wp/v2/posts?search=... - used for Gulf Job Paper, which republishes the
+    newspaper recruitment pages (Assignments Abroad Times, Gulf Job Paper) every day."""
+    out = []
+    days = int(cfg.get("days", 14))
+    from datetime import date, timedelta
+    cutoff = (date.today() - timedelta(days=days)).isoformat()
+    for site in cfg.get("sites", []):
+        n = 0
+        for q in cfg.get("queries") or ["civil engineer", "site engineer", "graduate engineer", "oil gas civil", "HSE officer", "storekeeper", "quantity surveyor"]:
+            url = (f"{site['base'].rstrip('/')}/wp-json/wp/v2/posts?search={quote_plus(q)}&per_page={int(cfg.get('per_query', 30))}"
+                   "&orderby=date&_fields=id,date,link,title,excerpt,content")
+            status, data = http_json(url)
+            if status != 200 or not isinstance(data, list):
+                log(f"{site['name']}: HTTP {status}")
+                break
+            for p in data:
+                d = (p.get("date") or "")[:10]
+                if d < cutoff:
+                    continue
+                title = clean((p.get("title") or {}).get("rendered", ""))
+                text = clean((p.get("content") or {}).get("rendered", "")) or clean((p.get("excerpt") or {}).get("rendered", ""))
+                # the posting often names several countries; guess from the title first, then the text
+                country = guess_country(title) or guess_country(text[:400])
+                if country and country not in countries(profile):
+                    continue
+                company = ""
+                m = re.search(r"\b(?:company|client|employer)\s*[:\-]\s*([A-Z][\w&.,' ]{3,60})", text)
+                if m:
+                    company = m.group(1).strip(" .,")
+                elif " – " in title or " - " in title or " | " in title:
+                    tail = re.split(r" [–|-] ", title)[-1][:60]
+                    tail = re.sub(r"\b(hiring|careers?|jobs?|vacanc(y|ies)|recruitment)\b", "", tail, flags=re.I).strip(" .,-")
+                    if tail and not re.search(r"\b(saudi|qatar|uae|dubai|abu dhabi|kuwait|oman|bahrain|gulf|project|urgent|walk)", tail, re.I):
+                        company = tail
+                out.append(job(title, company or site["name"], country or "Gulf (see ad)", p.get("link", ""), text[:4000], site["name"], country, d))
+                n += 1
+            time.sleep(0.4)
+        log(f"{site['name']} (newspaper ads): {n} posts")
+    return out
+
 ENRICHERS = {"Workday": enrich_workday, "SuccessFactors": enrich_successfactors, "Workable": enrich_workable,
-             "LinkedIn": enrich_linkedin}
+             "LinkedIn": enrich_linkedin, "Rigzone": enrich_rigzone}
 
 
 def enrich(j: dict) -> None:
@@ -402,7 +522,7 @@ def fetch_all(sources: dict, profile: dict) -> list[dict]:
         ("jooble", fetch_jooble), ("google_alerts_rss", fetch_rss), ("gulftalent", fetch_gulftalent),
         ("linkedin_guest", fetch_linkedin), ("seek", fetch_seek), ("workday", fetch_workday), ("successfactors", fetch_successfactors),
         ("workable", fetch_workable), ("greenhouse", fetch_greenhouse), ("lever", fetch_lever),
-        ("smartrecruiters", fetch_smartrecruiters),
+        ("smartrecruiters", fetch_smartrecruiters), ("rigzone", fetch_rigzone), ("newspapers", fetch_wordpress),
     ]
     jobs = []
     for key, fn in fetchers:

@@ -71,7 +71,8 @@ input[type=range]{accent-color:var(--accent)}
 .country:last-child{border-bottom:0}
 .country .name{font-weight:500}
 .country.off .name{color:var(--faint);text-decoration:line-through}
-.country input[type=range]{grid-column:1/-1;width:100%}
+.chip.pay{background:#e8f5e9;color:#1b5e20;font-family:var(--mono)}
+.chip.sec{background:#fff3e0;color:#8a4b00}
 .sw{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);cursor:pointer;white-space:nowrap}
 .sw input{accent-color:var(--accent);width:15px;height:15px;margin:0}
 .runs{display:flex;flex-direction:column;gap:6px;font-size:12px;margin-top:12px}
@@ -174,23 +175,24 @@ details summary{cursor:pointer;color:var(--muted);font-size:12px;margin-top:6px}
         <button id="runNow" class="primary">Search now</button>
         <button id="schedBtn" data-on="">Daily search: …</button>
       </div>
-      <p class="hint">A search takes 10–20 minutes. The daily search runs at 07:00 if this computer is on. <button class="link" id="openFolder">Open data folder</button><br><span class="mono" id="dataDir" style="font-size:11px"></span></p>
+      <p class="hint">A full search takes about 10–20 minutes (it polls many sites politely, one request at a time). The daily search runs at 07:00 if this computer is on. <button class="link" id="openFolder">Open data folder</button><br><span class="mono" id="dataDir" style="font-size:11px"></span></p>
       <div class="runs" id="runs"></div>
     </div>
     <div class="card">
       <h2>Countries</h2>
       <div id="countries"></div>
-      <p class="hint">Search finds jobs there · Apply writes application packs · slider = how much you want it.</p>
+      <p class="hint">Search = look for jobs there · Apply = write an application pack for each match.</p>
     </div>
     <div class="card">
       <h2>Matching</h2>
       <div class="row"><label for="minScore">Civil minimum score</label><input type="number" id="minScore" min="30" max="90" step="5"></div>
       <div class="row" style="margin-top:8px"><label for="minScoreOther">Other roles minimum</label><input type="number" id="minScoreOther" min="30" max="90" step="5"></div>
+      <div class="row" style="margin-top:8px"><label for="minScoreOil">Oil &amp; gas minimum</label><input type="number" id="minScoreOil" min="30" max="90" step="5"></div>
       <p class="hint">Below the minimum a job goes to Review instead of To apply. 55 balanced · 65 strict · 45 wide.</p>
     </div>
     <div class="card keys">
       <h2>Job sources <span class="hint" style="margin:0;text-transform:none;letter-spacing:0">free keys</span></h2>
-      <p class="hint" style="margin:0">LinkedIn, SEEK and employer sites need no key. Jooble adds Bayt, GulfTalent and Naukrigulf listings for each Gulf country — one free key per country from <span class="mono">xx.jooble.org/api/about</span>.</p>
+      <p class="hint" style="margin:0">LinkedIn, SEEK, Rigzone, Gulf Job Paper (newspaper ads) and employer sites need no key. Jooble adds Bayt, GulfTalent and Naukrigulf listings for each Gulf country — one free key per country from <span class="mono">xx.jooble.org/api/about</span>.</p>
       <div id="keysBox"></div>
       <details><summary>Where are keys stored?</summary><p class="hint">In <span class="mono">data/keys.json</span> next to the app, saved with the Save button.</p></details>
     </div>
@@ -200,6 +202,7 @@ details summary{cursor:pointer;color:var(--muted);font-size:12px;margin-top:6px}
     <div class="seg" id="catSeg">
       <button data-cat="civil" class="active">Civil engineering<span class="c" id="cCivil">0</span></button>
       <button data-cat="other">Other roles<span class="c" id="cOther">0</span></button>
+      <button data-cat="oil">Oil &amp; gas<span class="c" id="cOil">0</span></button>
     </div>
     <div class="tabs" id="tabs">
       <button class="tab active" data-tab="todo">To apply<span class="c" id="cTodo">0</span></button>
@@ -214,7 +217,7 @@ details summary{cursor:pointer;color:var(--muted);font-size:12px;margin-top:6px}
       <div class="ms" id="msRole"></div>
       <select id="fDays"><option value="">Any date</option><option value="1">Today</option><option value="3">Last 3 days</option><option value="7">Last 7 days</option><option value="14">Last 14 days</option><option value="30">Last 30 days</option></select>
       <select id="fScore"><option value="0">Any score</option><option value="55">Score ≥ 55</option><option value="65">Score ≥ 65</option><option value="75">Score ≥ 75</option><option value="85">Score ≥ 85</option></select>
-      <select id="fSort"><option value="score">Highest score</option><option value="date">Newest first</option><option value="company">Company A–Z</option><option value="country">Country</option></select>
+      <select id="fSort"><option value="score">Highest score</option><option value="date">Newest first</option><option value="company">Company A–Z</option><option value="country">Country</option><option value="pay">Pay stated first</option></select>
     </div>
     <div class="chips" id="chips"></div>
     <div class="resultbar"><span id="count"></span><span id="bulk"></span></div>
@@ -230,7 +233,7 @@ details summary{cursor:pointer;color:var(--muted);font-size:12px;margin-top:6px}
   
   const STATUSES = ["New","Review","Applied","Interview","Offer","Rejected","Skipped","Found (apply off)"];
   const TAB_OF = s => ["Applied","Interview","Offer"].includes(s) ? "applied" : (s==="New" ? "todo" : (s==="Review" ? "review" : "archive"));
-  const FIELDS = ["found_date","score","verdict","title","company","location","country","source","url","status","applied_date","notes","pack_file","user_notes","category"];
+  const FIELDS = ["found_date","score","verdict","title","company","location","country","source","url","status","applied_date","notes","pack_file","user_notes","category","sector","salary"];
   const JOOBLE = [["sa","Saudi Arabia"],["ae","UAE"],["qa","Qatar"],["kw","Kuwait"],["om","Oman"],["ca","Canada"],["au","Australia"],["us","Global (jooble.org)"]];
   
   let profile=null, profileSha="", keys=null, keysSha="", tracker=[], edits={}, cat="civil", tab="todo", packCache={};
@@ -286,16 +289,15 @@ details summary{cursor:pointer;color:var(--muted);font-size:12px;margin-top:6px}
       const c=cs[name]; const row=document.createElement("div"); row.className="country"+(c.search?"":" off");
       row.innerHTML=`<span class="name">${esc(name)}</span>
         <label class="sw"><input type="checkbox" data-k="search" ${c.search?"checked":""}> Search</label>
-        <label class="sw"><input type="checkbox" data-k="apply" ${c.apply?"checked":""} ${c.search?"":"disabled"}> Apply</label>
-        <input type="range" min="0.3" max="1" step="0.05" value="${c.weight??1}" title="Weight ${c.weight??1}">`;
+        <label class="sw"><input type="checkbox" data-k="apply" ${c.apply?"checked":""} ${c.search?"":"disabled"}> Apply</label>`;
       row.querySelectorAll("input[type=checkbox]").forEach(i=>i.addEventListener("change",()=>{ c[i.dataset.k]=i.checked; if(i.dataset.k==="search"&&!i.checked) c.apply=false; markDirty("profile"); renderSettings(); }));
-      row.querySelector("input[type=range]").addEventListener("input",e=>{ c.weight=+e.target.value; e.target.title="Weight "+c.weight; markDirty("profile"); });
       box.appendChild(row);
     });
-    $("minScore").value=profile.search.min_score??55; $("minScoreOther").value=profile.search.min_score_other??60;
+    $("minScore").value=profile.search.min_score??55; $("minScoreOther").value=profile.search.min_score_other??60; $("minScoreOil").value=profile.search.min_score_oilgas??55;
   }
   $("minScore").addEventListener("input",()=>{ profile.search.min_score=+$("minScore").value||55; markDirty("profile"); });
   $("minScoreOther").addEventListener("input",()=>{ profile.search.min_score_other=+$("minScoreOther").value||60; markDirty("profile"); });
+  $("minScoreOil").addEventListener("input",()=>{ profile.search.min_score_oilgas=+$("minScoreOil").value||55; markDirty("profile"); });
   function renderKeys(){
     const box=$("keysBox"); box.innerHTML=""; keys.jooble=keys.jooble||{};
     JOOBLE.forEach(([cc,label])=>{
@@ -324,16 +326,17 @@ details summary{cursor:pointer;color:var(--muted);font-size:12px;margin-top:6px}
     multi("msSource","All sources",uniq("source"),filt.sources);
     multi("msRole","All role types",[...new Set(tracker.map(r=>roleLabel(r.category)))].sort(),filt.roles);
   }
-  const roleLabel = c => c==="civil"?"Civil engineering":((profile.categories||{})[c]||{}).label||c;
+  const roleLabel = c => c==="civil"?"Civil engineering":(c==="oil_gas"?"Oil & gas":(((profile.categories||{})[c]||{}).label||c));
   const chipsOf=()=>{ const out=[]; filt.countries.forEach(v=>out.push(["countries",v])); filt.sources.forEach(v=>out.push(["sources",v])); filt.roles.forEach(v=>out.push(["roles",v])); if(filt.days) out.push(["days","Last "+filt.days+" day"+(filt.days==="1"?"":"s")]); if(filt.score) out.push(["score","Score ≥ "+filt.score]); if(filt.text) out.push(["text","“"+filt.text+"”"]); return out; };
   ["fText","fDays","fScore","fSort"].forEach(id=>$(id).addEventListener("input",()=>{ filt.text=$("fText").value.trim(); filt.days=$("fDays").value; filt.score=+$("fScore").value; filt.sort=$("fSort").value; renderJobs(); }));
 
   // ---------- jobs
   function renderJobs(){
-    const inCat = r => (cat==="civil") ? (r.category||"civil")==="civil" : (r.category||"civil")!=="civil";
-    const counts={todo:0,review:0,applied:0,archive:0}; let civil=0, other=0;
-    tracker.forEach(r=>{ ((r.category||"civil")==="civil")?civil++:other++; if(inCat(r)) counts[TAB_OF(r.status)]++; });
-    $("cCivil").textContent=civil; $("cOther").textContent=other;
+    const isOil = r => r.sector==="oil_gas" || r.category==="oil_gas";
+    const inCat = r => cat==="oil" ? isOil(r) : (cat==="civil" ? (!isOil(r) && (r.category||"civil")==="civil") : (!isOil(r) && (r.category||"civil")!=="civil"));
+    const counts={todo:0,review:0,applied:0,archive:0}; let civil=0, other=0, oil=0;
+    tracker.forEach(r=>{ if(isOil(r)) oil++; else if((r.category||"civil")==="civil") civil++; else other++; if(inCat(r)) counts[TAB_OF(r.status)]++; });
+    $("cCivil").textContent=civil; $("cOther").textContent=other; $("cOil").textContent=oil;
     $("cTodo").textContent=counts.todo; $("cReview").textContent=counts.review; $("cApplied").textContent=counts.applied; $("cArchive").textContent=counts.archive;
     $("kNew").textContent=tracker.filter(r=>r.status==="New").length; $("kApplied").textContent=tracker.filter(r=>["Applied","Interview","Offer"].includes(r.status)).length; $("kTotal").textContent=tracker.length;
     const base=tracker.filter(r=>inCat(r)&&TAB_OF(r.status)===tab);
@@ -344,7 +347,7 @@ details summary{cursor:pointer;color:var(--muted);font-size:12px;margin-top:6px}
     // facet counts within the current tab/category
     const cnt=k=>base.reduce((m,r)=>{const v=k==="role"?roleLabel(r.category):r[k]; m[v]=(m[v]||0)+1; return m;},{});
     $("msCountry").redraw(cnt("country")); $("msSource").redraw(cnt("source")); $("msRole").redraw(cnt("role"));
-    const sorters={score:(a,b)=>(+b.score)-(+a.score)||(b.found_date||"").localeCompare(a.found_date||""), date:(a,b)=>(b.found_date||"").localeCompare(a.found_date||"")||(+b.score)-(+a.score), company:(a,b)=>a.company.localeCompare(b.company)||(+b.score)-(+a.score), country:(a,b)=>(a.country||"").localeCompare(b.country||"")||(+b.score)-(+a.score)};
+    const sorters={score:(a,b)=>(+b.score)-(+a.score)||(b.found_date||"").localeCompare(a.found_date||""), date:(a,b)=>(b.found_date||"").localeCompare(a.found_date||"")||(+b.score)-(+a.score), company:(a,b)=>a.company.localeCompare(b.company)||(+b.score)-(+a.score), country:(a,b)=>(a.country||"").localeCompare(b.country||"")||(+b.score)-(+a.score), pay:(a,b)=>((b.salary?1:0)-(a.salary?1:0))||(+b.score)-(+a.score)};
     list.sort(sorters[filt.sort]||sorters.score);
     $("chips").innerHTML=chipsOf().map(([k,v])=>`<span class="chip" data-k="${k}" data-v="${esc(v)}">${esc(v)}</span>`).join("")+(chipsOf().length?' <button class="link small" id="clearF">Clear all</button>':"");
     $("chips").querySelectorAll(".chip").forEach(c=>c.addEventListener("click",()=>{ const k=c.dataset.k; if(filt[k] instanceof Set) filt[k].delete(c.dataset.v); else { filt[k]= (k==="score"?0:""); if(k==="text")$("fText").value=""; if(k==="days")$("fDays").value=""; if(k==="score")$("fScore").value="0"; } renderJobs(); }));
@@ -361,7 +364,7 @@ details summary{cursor:pointer;color:var(--muted);font-size:12px;margin-top:6px}
       el.innerHTML=`<div class="score ${cls}">${sc}<small>SCORE</small></div>
         <div>
           <div class="title"><a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.title)}</a></div>
-          <div class="meta"><span class="co">${esc(r.company)}</span><span>${esc(r.location||r.country)}</span><span class="mono">${esc(r.found_date)}</span><span class="chip src">${esc(r.source)}</span>${cat==="other"?`<span class="chip cat">${esc(roleLabel(r.category))}</span>`:""}${r.applied_date?`<span class="chip Applied">applied ${esc(r.applied_date)}</span>`:""}</div>
+          <div class="meta"><span class="co">${esc(r.company)}</span><span>${esc(r.location||r.country)}</span><span class="mono">${esc(r.found_date)}</span><span class="chip src">${esc(r.source)}</span>${cat!=="civil"?`<span class="chip cat">${esc(roleLabel(r.category))}</span>`:""}${r.salary?`<span class="chip pay" title="Pay mentioned in the posting">${esc(r.salary)}</span>`:""}${r.sector==="oil_gas"&&cat!=="oil"?`<span class="chip sec">Oil &amp; gas</span>`:""}${r.applied_date?`<span class="chip Applied">applied ${esc(r.applied_date)}</span>`:""}</div>
         </div>
         <div class="ctrl">
           <select class="st">${STATUSES.map(s=>`<option ${s===r.status?"selected":""}>${s}</option>`).join("")}</select>

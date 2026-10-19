@@ -23,8 +23,35 @@ def required_years(text: str) -> tuple[int | None, int | None]:
     return None, None
 
 
+CURRENCY = r"(?:SAR|SR|AED|QAR|QR|KWD|KD|OMR|RO|BHD|BD|CAD|AUD|USD|US\$|C\$|A\$|\$|£|€|riyals?|dirhams?|dinars?|dollars?)"
+NUMBER = r"\d{1,3}(?:[,.]\d{3})+|\d{4,6}|\d{1,3}\s*k"
+SALARY_RE = re.compile(
+    rf"({CURRENCY})\s*({NUMBER})(?:\s*(?:-|–|to)\s*({NUMBER}))?"
+    rf"|({NUMBER})(?:\s*(?:-|–|to)\s*({NUMBER}))?\s*({CURRENCY})", re.I)
+SALARY_CTX = re.compile(r"salary|per month|monthly|per annum|per year|p\.a\.|package|compensation|pay|remuneration|/month|/year|a month|a year", re.I)
+
+
+def find_salary(text: str) -> str:
+    """Return the first money amount that sits near a salary-like word, e.g. 'SAR 8,000 - 10,000 per month'."""
+    for m in SALARY_RE.finditer(text):
+        window = text[max(0, m.start() - 80): m.end() + 80]
+        if SALARY_CTX.search(window):
+            return re.sub(r"\s+", " ", m.group(0)).strip()[:40]
+    return ""
+
+
+def find_sector(j: dict, profile: dict) -> str:
+    text = (j["title"] + " " + j["company"] + " " + j.get("description", "")).lower()
+    for key, sec in (profile.get("sectors") or {}).items():
+        if key.startswith("_"):
+            continue
+        if any(re.search(p, text, re.I) for p in sec.get("patterns", [])):
+            return key
+    return ""
+
+
 def score(j: dict, profile: dict) -> tuple[int, str, list[str]]:
-    """Score against every category, keep the best. Sets j["category"].
+    """Score against every category, keep the best. Sets j["category"], j["sector"], j["salary"].
     Returns (score, verdict, reasons). verdict: 'apply' | 'maybe' | 'reject'."""
     best = None
     cats = {"civil": {"target_titles": profile["target_titles"], "keyword_points": profile["keyword_points"]}}
@@ -36,6 +63,12 @@ def score(j: dict, profile: dict) -> tuple[int, str, list[str]]:
         if best is None or s > best[0]:
             best = (s, v, r, key)
     j["category"] = best[3]
+    j["sector"] = find_sector(j, profile)
+    j["salary"] = find_salary(j["title"] + " " + j.get("description", ""))
+    if j["sector"]:
+        best[2].append("sector:" + j["sector"])
+    if j["salary"]:
+        best[2].append("pay: " + j["salary"])
     return best[0], best[1], best[2]
 
 
@@ -73,12 +106,18 @@ def _score_one(j: dict, profile: dict, cat: str, target_titles: list, keyword_po
         if lo <= yrs and (hi is None or hi >= yrs):
             pts += 15
             reasons.append(f"experience fits ({lo}-{hi or '+'} yrs)")
+        elif lo <= yrs:
+            pts += 12          # junior / fresher range (e.g. 0-2 yrs): over-qualified is still a real option
+            reasons.append(f"junior range ({lo}-{hi} yrs) - fits")
         elif lo <= yrs + 1:
             pts += 3
             reasons.append(f"experience close ({lo}+ yrs)")
         else:
             pts -= 30
             reasons.append(f"asks {lo}+ yrs")
+    if re.search(r"\b(fresh(er|\s+graduate)s?|graduate (program|programme|trainee|engineer)|entry[- ]level|trainee|0\s*(-|to)\s*[12]\s*(years|yrs))\b", text):
+        pts += 8
+        reasons.append("starter role")
 
     # 5. Keyword points (capped so a long description can't dominate)
     kw = 0
@@ -114,6 +153,7 @@ def _score_one(j: dict, profile: dict, cat: str, target_titles: list, keyword_po
         reasons.append("wants local candidates")
 
     s = max(0, min(100, pts))
-    threshold = profile["search"]["min_score"] if cat == "civil" else profile["search"].get("min_score_other", profile["search"]["min_score"] + 5)
+    sp = profile["search"]
+    threshold = sp["min_score"] if cat == "civil" else (sp.get("min_score_oilgas", sp["min_score"]) if cat == "oil_gas" else sp.get("min_score_other", sp["min_score"] + 5))
     verdict = "apply" if s >= threshold else ("maybe" if s >= threshold - 15 else "reject")
     return s, verdict, reasons

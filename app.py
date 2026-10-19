@@ -30,8 +30,64 @@ def ensure_data():
     for name in ("profile.json", "keys.json", "sources.json"):
         if not (DATA / name).exists():
             shutil.copy(BUNDLE / name, DATA / name)
+    upgrade_config()
     if not (DATA / "tracker.csv").exists():
-        (DATA / "tracker.csv").write_text("﻿found_date,score,verdict,title,company,location,country,source,url,status,applied_date,notes,pack_file,user_notes,category\n", encoding="utf-8")
+        (DATA / "tracker.csv").write_text("﻿found_date,score,verdict,title,company,location,country,source,url,status,applied_date,notes,pack_file,user_notes,category,sector,salary\n", encoding="utf-8")
+
+
+def _merge(dst, src, path=""):
+    """Add keys/items a newer program version introduced, without touching the user's own settings."""
+    changed = False
+    if isinstance(dst, dict) and isinstance(src, dict):
+        for k, v in src.items():
+            if k not in dst:
+                dst[k] = v; changed = True
+            elif isinstance(v, (dict, list)) and isinstance(dst[k], type(v)):
+                changed = _merge(dst[k], v, path + "/" + k) or changed
+    elif isinstance(dst, list) and isinstance(src, list):
+        if all(isinstance(x, str) for x in src):                      # word lists: union
+            have = {x.lower() for x in dst if isinstance(x, str)}
+            for x in src:
+                if x.lower() not in have:
+                    dst.append(x); changed = True
+        elif all(isinstance(x, dict) for x in src):                   # boards / sites: add new ones by name
+            key = lambda d: (d.get("company") or d.get("name") or d.get("account") or json.dumps(d, sort_keys=True))
+            have = {key(d) for d in dst if isinstance(d, dict)}
+            for d in src:
+                if key(d) not in have:
+                    dst.append(d); changed = True
+    return changed
+
+
+def upgrade_config():
+    """profile.json / sources.json in the data folder gain whatever the bundled copies added (new sources, categories ...)."""
+    for name in ("profile.json", "sources.json"):
+        try:
+            user = json.loads((DATA / name).read_text(encoding="utf-8"))
+            bundled = json.loads((BUNDLE / name).read_text(encoding="utf-8"))
+            changed = _merge(user, bundled)
+            if name == "profile.json":                       # settings this version retired
+                for k in ("fresh graduate", "oil & gas", "oil and gas"):
+                    if k in user.get("title_penalties", {}):
+                        user["title_penalties"].pop(k); changed = True
+                if user.get("title_penalties", {}).get("intern", 0) < -15:
+                    user["title_penalties"]["intern"] = -15; changed = True
+            if changed:
+                (DATA / name).write_text(json.dumps(user, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        except Exception as e:  # noqa
+            print(f"config upgrade skipped for {name}: {e}")
+    # older tracker files: add the new columns
+    try:
+        t = DATA / "tracker.csv"
+        head = t.read_text(encoding="utf-8-sig").splitlines()[0] if t.exists() else ""
+        if head and "sector" not in head:
+            import csv, io
+            rows = list(csv.DictReader(io.StringIO(t.read_text(encoding="utf-8-sig"))))
+            fields = head.split(",") + ["sector", "salary"]
+            with t.open("w", encoding="utf-8-sig", newline="") as f:
+                w = csv.DictWriter(f, fieldnames=fields); w.writeheader(); w.writerows(rows)
+    except Exception as e:  # noqa
+        print(f"tracker upgrade skipped: {e}")
 
 
 # ----------------------------------------------------------------------------- agent run
