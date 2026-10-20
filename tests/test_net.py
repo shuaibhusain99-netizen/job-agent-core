@@ -207,10 +207,10 @@ class Logs(unittest.TestCase):
         import io, contextlib
         buf = io.StringIO()
         with contextlib.redirect_stderr(buf):
-            util.log("  network error https://sa.jooble.org/api/34b9bf41-aaaa-bbbb: timed out")
+            util.log("  network error https://sa.jooble.org/api/deadbeef-aaaa-bbbb: timed out")
             util.log("GET https://x.example/search?q=a&api_key=SECRET123&page=2")
         out = buf.getvalue()
-        self.assertNotIn("34b9bf41", out)
+        self.assertNotIn("deadbeef", out)
         self.assertNotIn("SECRET123", out)
         self.assertIn("jooble.org/api/<key>", out)
 
