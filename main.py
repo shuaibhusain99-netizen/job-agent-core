@@ -7,7 +7,7 @@ Needs only the Python standard library.
 """
 from __future__ import annotations
 import argparse, hashlib, json, sys
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 from agent.sources import fetch_all, enrich_many, load_keys
@@ -96,6 +96,7 @@ def main() -> int:
         j["_known"] = known_key.get(dedupe_key(j))
     jobs.sort(key=lambda j: -j["match_score"])
     want = []
+    week_ago = (date.today() - timedelta(days=7)).isoformat()
     for j in jobs:
         if j["verdict"] == "reject":
             continue
@@ -103,11 +104,16 @@ def main() -> int:
             row = known[j["_known"]]
             if not tracker._untouched(row) or tracker._known_len(row) >= 400:
                 continue
+            if details.load(j["url"]).get("tried", "") >= week_ago:
+                continue                        # its full ad couldn't be read in the last week: don't ask again daily
         want.append(j)
     try:
         fetched = enrich_many(want, args.max_enrich)
     finally:
         sitebrowse.close()                      # the search browser is not needed after this
+    for j in want[:args.max_enrich]:
+        if len(j.get("description", "")) < 300 or j.get("_snippet"):
+            details.save(j["url"], {"tried": date.today().isoformat()})
     for j in want:
         if len(j.get("description", "")) >= 300:
             j["match_score"], j["verdict"], r = score(j, PROFILE)
