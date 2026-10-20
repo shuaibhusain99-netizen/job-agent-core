@@ -6,8 +6,6 @@
 <title>Job Agent</title>
 <meta name="description" content="Control panel for the job agent: settings, runs and the application tracker.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230f5e7a'/%3E%3Cpath d='M8 22h16M10 22V12l6-4 6 4v10' stroke='%23fff' stroke-width='2.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
 /* Layout: sticky top bar · left rail (status, agent, settings) · main = category switch → status tabs → filter bar → job cards.
    Drafting-paper neutrals with a blueprint-teal accent; green/amber/red reserved for meaning. */
@@ -15,7 +13,7 @@
   --bg:#f4f2ee; --panel:#ffffff; --panel-2:#f7f6f2; --ink:#1b2126; --muted:#656c74; --faint:#9aa1a8; --line:#dcd8cf; --line-2:#ebe8e1;
   --accent:#0f5e7a; --accent-ink:#ffffff; --accent-soft:#e3eef3;
   --ok:#2a7a4b; --ok-soft:#e2f1e7; --warn:#a86a00; --warn-soft:#f6ecd6; --bad:#a93a3a; --bad-soft:#f5e2e2;
-  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif; --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; --mono:ui-monospace,"Cascadia Mono",Consolas,Menlo,monospace;
   --r:10px; --shadow:0 1px 2px rgba(20,25,30,.06),0 4px 16px rgba(20,25,30,.05); color-scheme:light;
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#13171a;--panel:#1b2024;--panel-2:#20262b;--ink:#e9e7e1;--muted:#a3aab1;--faint:#6f767d;--line:#2f363c;--line-2:#272d33;--accent:#62b8d6;--accent-ink:#0d1b22;--accent-soft:#1c2f38;--ok:#6fcb93;--ok-soft:#173224;--warn:#e5aa4b;--warn-soft:#3a2c12;--bad:#e57b7b;--bad-soft:#3b1f1f;--shadow:0 1px 2px rgba(0,0,0,.4),0 6px 20px rgba(0,0,0,.35);color-scheme:dark}}
@@ -200,7 +198,7 @@ details summary{cursor:pointer;color:var(--muted);font-size:12px;margin-top:6px}
     </div>
     <div class="card mail-set">
       <h2>E-mail applications</h2>
-      <p class="hint" style="margin:0 0 4px"><b>Apply on site</b> opens the job in a separate browser window (your Edge/Chrome, own profile — sign in to LinkedIn, Bayt etc. once and it stays signed in), fills the form from your profile and attaches the CV below; you check it and press the site's own Submit. A small JobAgent bar on the page has <i>Fill again</i> and <i>I submitted ✓</i>.</p>
+      <p class="hint" style="margin:0 0 4px"><b>Apply on site</b> opens the job in a separate browser window (Edge/Chrome with its own profile — sign in to LinkedIn, Bayt etc. once and it stays signed in). On the job's own site and known job boards it fills the fields you can see from your profile; on any other site it waits until you press <i>Fill this page</i>. Your CV is attached only when you press <i>Attach CV</i>. It never ticks consent boxes, never answers personal or legal declarations, and never submits — you check the form and press the site's own button. The JobAgent bar on the page also has <i>I submitted ✓</i>.</p>
       <p class="hint" style="margin:0 0 4px">Ads that say "send your CV to …" get a <b>Send application</b> button. The e-mail goes from your own address with your CV attached; a copy is kept in <span class="mono">data/sent</span>.</p>
       <label>Mail provider</label><select id="mPreset"><option value="gmail">Gmail</option><option value="outlook">Outlook.com / Hotmail</option><option value="office365">Microsoft 365 (work)</option><option value="yahoo">Yahoo</option><option value="">Other (SMTP below)</option></select>
       <div id="mCustom" hidden><label>SMTP server</label><input id="mHost" placeholder="smtp.example.com"><label>Port</label><input id="mPort" value="587"></div>
@@ -268,7 +266,8 @@ details summary{cursor:pointer;color:var(--muted);font-size:12px;margin-top:6px}
   const b64d = s => decodeURIComponent(escape(atob(s.replace(/\n/g,""))));
   const b64e = s => btoa(unescape(encodeURIComponent(s)));
   const today = () => new Date().toISOString().slice(0,10);
-  async function api(path, body){ const r=await fetch(path, body?{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}:{}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error){ throw new Error(j.error||("HTTP "+r.status)); } return j; }
+  const TOKEN = "__JOBAGENT_TOKEN__";   // written in by the app each time it starts
+  async function api(path, body){ const h={"X-JobAgent-Token":TOKEN}; if(body) h["Content-Type"]="application/json"; const r=await fetch(path, body?{method:"POST",headers:h,body:JSON.stringify(body)}:{headers:h}); const j=await r.json().catch(()=>({})); if(!r.ok||j.error){ throw new Error(j.error||("HTTP "+r.status)); } return j; }
   const getFile = async p => ({text:(await api("/api/file?path="+encodeURIComponent(p))).text, sha:""});
   const putFile = async (p, text) => { await api("/api/file?path="+encodeURIComponent(p), {text}); return {content:{sha:""}}; };
   function markDirty(k){ dirty[k]=true; $("unsaved").classList.add("on"); $("saveAll").disabled=false; }
@@ -276,8 +275,9 @@ details summary{cursor:pointer;color:var(--muted);font-size:12px;margin-top:6px}
   function setState(kind,text){ $("dot").className="dot "+kind; $("stateText").textContent=text; }
 
   // ---------- CSV
-  function parseCSV(text){ const rows=[]; let row=[],f="",q=false; text=text.replace(/^\uFEFF/,""); for(let i=0;i<text.length;i++){const c=text[i]; if(q){ if(c==='"'){ if(text[i+1]==='"'){f+='"';i++;} else q=false; } else f+=c; } else if(c==='"') q=true; else if(c===','){row.push(f);f="";} else if(c==='\n'||c==='\r'){ if(c==='\r'&&text[i+1]==='\n') i++; row.push(f); rows.push(row); row=[]; f=""; } else f+=c; } if(f!==""||row.length){row.push(f);rows.push(row);} const h=rows.shift()||[]; return rows.filter(r=>r.length>1).map(r=>Object.fromEntries(h.map((k,i)=>[k,r[i]??""]))); }
-  function toCSV(rows){ const e=v=>{v=String(v??""); return /[",\n\r]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}; return "\uFEFF"+FIELDS.join(",")+"\n"+rows.map(r=>FIELDS.map(k=>e(r[k])).join(",")).join("\n")+"\n"; }
+  const unesc = v => (v && v[0]==="'" && "=+-@\t\r".includes(v[1]||"x")) ? v.slice(1) : v;
+  const safeHref = u => /^https?:\/\//i.test(u||"") ? u : "#";
+  function parseCSV(text){ const rows=[]; let row=[],f="",q=false; text=text.replace(/^\uFEFF/,""); for(let i=0;i<text.length;i++){const c=text[i]; if(q){ if(c==='"'){ if(text[i+1]==='"'){f+='"';i++;} else q=false; } else f+=c; } else if(c==='"') q=true; else if(c===','){row.push(f);f="";} else if(c==='\n'||c==='\r'){ if(c==='\r'&&text[i+1]==='\n') i++; row.push(f); rows.push(row); row=[]; f=""; } else f+=c; } if(f!==""||row.length){row.push(f);rows.push(row);} const h=rows.shift()||[]; return rows.filter(r=>r.length>1).map(r=>Object.fromEntries(h.map((k,i)=>[k,unesc(r[i]??"")]))); }
 
   // ---------- load
   async function loadAll(){
@@ -385,7 +385,7 @@ details summary{cursor:pointer;color:var(--muted);font-size:12px;margin-top:6px}
       const sc=+r.score; const cls=sc>=70?"hi":(sc>=55?"mid":"lo");
       el.innerHTML=`<div class="score ${cls}">${sc}<small>SCORE</small></div>
         <div>
-          <div class="title"><a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.title)}</a></div>
+          <div class="title"><a href="${esc(safeHref(r.url))}" target="_blank" rel="noopener noreferrer">${esc(r.title)}</a></div>
           <div class="meta"><span class="co">${esc(r.company)}</span><span>${esc(r.location||r.country)}</span><span class="mono">${esc(r.found_date)}</span><span class="chip src">${esc(r.source)}</span>${cat!=="civil"?`<span class="chip cat">${esc(roleLabel(r.category))}</span>`:""}${r.salary?`<span class="chip pay" title="Pay mentioned in the posting">${esc(r.salary)}</span>`:""}${r.sector==="oil_gas"&&cat!=="oil"?`<span class="chip sec">Oil &amp; gas</span>`:""}${r.apply_email?`<span class="chip mail" title="${esc(r.apply_email)}">apply by e-mail</span>`:""}${r.applied_date?`<span class="chip Applied">applied ${esc(r.applied_date)}</span>`:""}</div>
         </div>
         <div class="ctrl">
@@ -458,7 +458,7 @@ details summary{cursor:pointer;color:var(--muted);font-size:12px;margin-top:6px}
   function watchApply(r){
     clearTimeout(applyT);
     const tick=async()=>{ try{ const s=await api("/api/apply-status"); const st=s[r.url]; if(!st) return; const last=st.log[st.log.length-1]||""; if(last) setState("running","apply window: "+last);
-        if(st.stopped||/submitted|marked/.test(last)){ setState("ok","ready"); const fresh=await getFile("tracker.csv"); const row=parseCSV(fresh.text).find(x=>x.url===r.url); if(row&&row.status!==r.status){ Object.assign(r,{status:row.status,applied_date:row.applied_date}); renderJobs(); toast("Marked as "+row.status); } return; }
+        if(st.stopped||st.done){ setState("ok","ready"); const fresh=await getFile("tracker.csv"); const row=parseCSV(fresh.text).find(x=>x.url===r.url); if(row&&row.status!==r.status){ Object.assign(r,{status:row.status,applied_date:row.applied_date}); renderJobs(); toast("Marked as "+row.status); } return; }
         applyT=setTimeout(tick,3000); }catch(_){ } };
     applyT=setTimeout(tick,2500);
   }
@@ -467,7 +467,7 @@ details summary{cursor:pointer;color:var(--muted);font-size:12px;margin-top:6px}
   async function saveAll(){
     $("saveAll").disabled=true; const done=[];
     try{
-      if(dirty.tracker){ const fresh=await getFile("tracker.csv"); const rows=parseCSV(fresh.text); rows.forEach(r=>{ r.category=r.category||"civil"; if(edits[r.url]) Object.assign(r,edits[r.url]); }); await putFile("tracker.csv", toCSV(rows), fresh.sha, "Statuses from control page"); tracker=rows; edits={}; done.push("tracker"); }
+      if(dirty.tracker){ await api("/api/edits",{edits}); const fresh=await getFile("tracker.csv"); tracker=parseCSV(fresh.text); tracker.forEach(r=>{ r.category=r.category||"civil"; }); edits={}; done.push("job list"); }
       if(dirty.profile){ const r=await putFile("profile.json", JSON.stringify(profile,null,2)+"\n", profileSha, "Settings from control page"); profileSha=r.content.sha; done.push("settings"); }
       if(dirty.keys){ const r=await putFile("keys.json", JSON.stringify(keys,null,2)+"\n", keysSha, "API keys from control page"); keysSha=r.content.sha; done.push("keys"); }
       clearDirty(); renderJobs(); toast("Saved "+done.join(", "));

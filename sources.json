@@ -61,7 +61,8 @@
         "host": "wd5",
         "site": "BakerHughes"
       }
-    ]
+    ],
+    "pages": 5
   },
   "successfactors": {
     "_comment": "SAP SuccessFactors career sites (search page HTML). base = site root, slug = path segment.",
@@ -70,11 +71,6 @@
         "company": "alfanar",
         "base": "https://jobs.alfanar.com",
         "slug": "alfanar"
-      },
-      {
-        "company": "Halliburton",
-        "base": "https://jobs.halliburton.com",
-        "slug": ""
       }
     ]
   },
@@ -154,5 +150,6 @@
         "base": "https://www.gulfjobpaper.com"
       }
     ]
-  }
+  },
+  "_version": 3
 }

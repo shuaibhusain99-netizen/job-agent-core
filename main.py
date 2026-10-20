@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Civil Engineer Job Agent — search, match, prepare, track.
+"""Job Agent — search, match, prepare, track. Run by the desktop app (app.py) with ROOT etc. pointed at its data folder.
 
 Run:  python main.py            (full daily run)
       python main.py --dry      (no sheet push, no tracker write; prints results)
 Needs only the Python standard library.
 """
 from __future__ import annotations
-import argparse, json, os, sys
+import argparse, hashlib, json, sys
 from datetime import date
 from pathlib import Path
 
@@ -38,35 +38,46 @@ def main() -> int:
     # 1. search
     raw = fetch_all(SOURCES, PROFILE)
     unique: dict[str, dict] = {}
-    seen_tc: set[str] = set()
+    seen_tcc: set[str] = set()
     for j in raw:
         k = dedupe_key(j)
-        tc = (j["title"].lower().strip() + "|" + j["company"].lower().strip()) if j["company"] != "Unknown" else ""
-        if k and k not in unique and (not tc or tc not in seen_tc):
+        # the same title at the same company in the same country is one job, wherever it was found
+        tcc = "|".join([j["title"].lower().strip(), j["company"].lower().strip(), j.get("country") or j["location"].lower()]) \
+            if j["company"] != "Unknown" else ""
+        if k and k not in unique and (not tcc or tcc not in seen_tcc):
             unique[k] = j
-            if tc:
-                seen_tc.add(tc)
+            if tcc:
+                seen_tcc.add(tcc)
     log(f"Collected {len(raw)} rows, {len(unique)} unique")
 
-    # 2. first-pass score on title + snippet, then fetch full text for the promising ones and rescore
+    # 2. the job list as it stands (by the same keys, so a LinkedIn job seen on another subdomain is still "known")
+    known = tracker.load(TRACKER)
+    tracker.backfill_from_notes(known)
+    known_key = {dedupe_key(r): u for u, r in known.items()}
+    for r in tracker.sweep_titles(known, PROFILE):
+        drop_pack(r)
+    swept = sum(1 for r in known.values() if (r.get("notes") or "").startswith("auto: title"))
+    if swept:
+        log(f"Archived listed jobs that today's title rules exclude (nationals-only, other disciplines): {swept} in total")
+
+    # 3. score on what the listing gives, then fetch the full ad for promising jobs and re-score.
+    #    Known jobs are re-read only if they are still open in your list and were judged on a snippet.
     jobs = list(unique.values())
     for j in jobs:
         j["match_score"], j["verdict"], r = score(j, PROFILE)
         j["reasons"] = "; ".join(r)
+        j["_known"] = known_key.get(dedupe_key(j))
     jobs.sort(key=lambda j: -j["match_score"])
-    # Full text is fetched only for jobs not already in the tracker (they were judged on an earlier day),
-    # best first, so the budget goes where it changes a decision.
-    known = tracker.load(TRACKER)
-    tracker.backfill_from_notes(known)
-    swept = tracker.sweep_titles(known, PROFILE)
-    if swept:
-        log(f"Archived {swept} listed jobs that today's title rules exclude (nationals-only, other disciplines)")
     budget = args.max_enrich
     for j in jobs:
         if budget <= 0:
             break
-        if j["verdict"] == "reject" or j["url"] in known:
+        if j["verdict"] == "reject":
             continue
+        if j["_known"]:
+            row = known[j["_known"]]
+            if not tracker._untouched(row) or tracker._known_len(row) >= 400:
+                continue
         before = len(j.get("description", ""))
         enrich(j)
         if len(j.get("description", "")) != before:
@@ -74,39 +85,47 @@ def main() -> int:
             j["match_score"], j["verdict"], r = score(j, PROFILE)
             j["reasons"] = "; ".join(r)
     jobs.sort(key=lambda j: -j["match_score"])
-    log(f"Fetched full descriptions for {args.max_enrich - budget} new candidates")
+    log(f"Fetched full descriptions for {args.max_enrich - budget} jobs")
 
-    # 3. dedupe against tracker, prepare packs for new matches
-    new_rows = []
-    refreshed = 0
+    # 4. update known jobs, add new ones, write application packs for new matches
+    apply_countries = countries(PROFILE, "apply")
+    new_rows, updated, skipped = [], 0, 0
     for j in jobs:
-        if j["url"] in known:
-            refreshed += tracker.refresh(known[j["url"]], j)
+        if j["_known"]:
+            row = known[j["_known"]]
+            res = tracker.refresh(row, j, apply_countries)
+            updated += res == "updated"
+            if res == "skipped":
+                skipped += 1
+                drop_pack(row)
             continue
         if j["verdict"] == "reject":
             continue
-        if j["verdict"] == "apply" and j.get("country") not in countries(PROFILE, "apply"):
+        if j["verdict"] == "apply" and j.get("country") not in apply_countries:
             j["verdict"] = "found"          # country searched but applying switched off
         if j["verdict"] == "apply":
-            safe = "".join(c if c.isalnum() else "-" for c in f"{j['company']}-{j['title']}")[:70].strip("-")
-            pack = PACKS / f"{date.today():%Y-%m-%d}-{safe}.md"
+            safe = "".join(c if c.isalnum() else "-" for c in f"{j['company']}-{j['title']}")[:60].strip("-")
+            tag = hashlib.sha1(j["url"].encode()).hexdigest()[:6]
+            pack = PACKS / f"{date.today():%Y-%m-%d}-{safe}-{tag}.md"
             pack.write_text(application_pack(j, PROFILE), encoding="utf-8")
-            j["pack_file"] = str(pack.relative_to(ROOT))
+            j["pack_file"] = pack.relative_to(ROOT).as_posix()
         row = tracker.row_from_job(j)
         new_rows.append(row)
         known[j["url"]] = row
 
-    # 4. report
+    # 5. report
     stamp = date.today().isoformat()
     report = REPORTS / f"jobs_{stamp}.csv"
     import csv
     with report.open("w", encoding="utf-8-sig", newline="") as f:
         w = csv.DictWriter(f, fieldnames=["match_score", "verdict", "title", "company", "location", "country", "source", "url", "reasons"], extrasaction="ignore")
         w.writeheader()
-        w.writerows(j for j in jobs if j["verdict"] != "reject")
+        for j in jobs:
+            if j["verdict"] != "reject":
+                w.writerow({k: tracker._esc(j.get(k, "")) for k in w.fieldnames})
 
     apply_new = [r for r in new_rows if r["verdict"] == "apply"]
-    log(f"Re-checked {refreshed} jobs already in the list (updated details or scores; rejects moved to Archived)")
+    log(f"Jobs already in your list: {updated} updated, {skipped} moved to Archived by today's rules")
     print(f"\n=== {stamp}: {len(jobs)} jobs scanned, {sum(1 for j in jobs if j['verdict']!='reject')} relevant, "
           f"{len(new_rows)} new, {len(apply_new)} ready to apply ===")
     for r in sorted(new_rows, key=lambda r: -int(r["score"]))[:25]:
@@ -116,15 +135,21 @@ def main() -> int:
             print(f"       pack: {r['pack_file']}")
 
     if args.dry:
-        print("\n(dry run: tracker and sheet not updated)")
+        print("\n(dry run: job list not updated)")
         return 0
     tracker.save(TRACKER, known)
-    # expose counts to the workflow for the run summary
-    gh = os.getenv("GITHUB_OUTPUT")
-    if gh:
-        with open(gh, "a") as f:
-            f.write(f"new={len(new_rows)}\napply={len(apply_new)}\n")
     return 0
+
+
+def drop_pack(row: dict) -> None:
+    """Delete the application pack of a job the rules have archived (only files inside the packs folder)."""
+    rel = row.get("pack_file") or ""
+    if not rel:
+        return
+    p = (ROOT / rel).resolve()
+    if p.is_relative_to(PACKS.resolve()) and p.suffix == ".md":
+        p.unlink(missing_ok=True)
+    row["pack_file"] = ""
 
 
 if __name__ == "__main__":

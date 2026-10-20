@@ -1,8 +1,14 @@
-/* JobAgent form filler - injected into the job page by agent/browser.py.
-   Fills fields it recognises (never clicks Submit/Next), shows a small bar, reports back to the app. */
+/* JobAgent form filler - runs in an ISOLATED WORLD of the job page (set up by agent/browser.py).
+   The page shares the DOM but cannot see these variables or patch these built-ins.
+   Rules: auto-fill only on the job's own site / known job boards (elsewhere only after you click "Fill this page");
+   only fields that are really on screen; the CV only after you click "Attach CV"; never ticks consent or legal
+   declarations; never clicks Submit/Next. The app reads __ja.state() to know what happened. */
 (() => {
-  if (window.__jobagent) return;
+  if (window.__ja) return;
   const CTX = __JOBAGENT_CONTEXT__;
+  const HOST = (location.hostname || "").toLowerCase();
+  const AUTO = (CTX.hosts || []).some(h => HOST === h || HOST.endsWith("." + h));
+  if (window !== window.top) return;            // forms inside other sites' frames are left alone
   const P = CTX.profile, C = P.candidate, F = P.form_answers || {}, JOB = CTX.job || {};
   const GCC = ["Saudi Arabia", "United Arab Emirates", "Qatar", "Kuwait", "Oman", "Bahrain"];
   const inGCC = GCC.includes(JOB.country || "") || !JOB.country;
@@ -14,7 +20,7 @@
   const coverLetter = CTX.cover_letter || "";
   const answersRx = Object.entries(P.screening_answers || {}).filter(([k]) => !k.startsWith("_")).map(([k, v]) => [new RegExp(k, "i"), v]);
   const nationality = F.nationality || "Bahraini";
-  const todayYear = new Date().getFullYear();
+  const YEARS = String(CTX.years ?? C.years_experience ?? "");
 
   // ---- text-value rules: [regex on the field's descriptor, value]. First match wins.
   const RULES = [
@@ -35,7 +41,7 @@
     [/\b(website|portfolio|github|url)\b/i, ""],
     [/\b(current|present|latest|most recent|last)\b.*\b(job\s*title|position|role|designation)\b|\b(job\s*title|designation)\b/i, F.current_title || "Project Engineer"],
     [/\b(current|present|latest|most recent|last)\b.*\b(company|employer|organi[sz]ation)\b|\b(company|employer)\s*name\b/i, F.current_company || "Al Door Excavation & Building Contracting"],
-    [/\b(total|years?|yrs?)\b.*\bexperience\b|\bexperience\b.*\b(years?|yrs?)\b/i, (d, el) => el.type === "number" || /^\s*$/.test(el.placeholder || "") && el.tagName !== "TEXTAREA" ? String(C.years_experience) : `${C.years_experience} years`],
+    [/\b(total|years?|yrs?)\b.*\bexperience\b|\bexperience\b.*\b(years?|yrs?)\b/i, (d, el) => el.type === "number" || /^\s*$/.test(el.placeholder || "") && el.tagName !== "TEXTAREA" ? YEARS : `${YEARS} years`],
     [/\bnotice\s*period\b|\bavailab(le|ility)\b.*\b(start|join|date)\b|\bstart\s*date\b|\bjoining\b/i, F.notice_text || `${C.notice_period}`],
     [/\b(expected|desired|target)\b.*\b(salary|pay|compensation|ctc)\b|\bsalary\s*expectation/i, F.expected_salary || "Negotiable"],
     [/\bcurrent\b.*\b(salary|pay|ctc)\b/i, F.current_salary || ""],
@@ -44,9 +50,6 @@
     [/\b(major|field of study|specialis|discipline|course)\b/i, "Civil Engineering"],
     [/\b(graduat|completion|end)\w*\s*(year|date)\b|\byear\s*of\s*(graduation|passing)\b/i, F.grad_year || "2021"],
     [/\bgpa\b|\bgrade\b|\bcgpa\b/i, F.gpa || "3.17"],
-    [/\b(gender|sex)\b/i, F.gender || ""],
-    [/\b(date of birth|dob|birth)\b/i, F.dob || ""],
-    [/\bage\b/i, F.age || ""],
     [/\b(cover\s*letter|covering letter|motivation|why (do you|are you|should we)|tell us|about yourself|introduce yourself|summary|message to|additional information|comments?)\b/i, (d) => answerFor(d) || coverLetter],
     [/\b(skills?|certifications?|software)\b/i, (d) => answerFor(d) || (C.software || []).join(", ")],
     [/\b(languages?)\b/i, (C.languages || []).join(", ")],
@@ -58,7 +61,7 @@
     [/\b(authori[sz]ed|legally|eligible|permitted|right)\b.*\bwork\b|\bwork\s*(permit|authori[sz]ation)\b/i, inGCC ? "Yes" : "No"],
     [/\bsponsor/i, inGCC ? "No" : "Yes"],
     [/\bvisa\b/i, inGCC ? "No" : "Yes"],
-    [/\brelocat|\bwilling to (move|travel|work)|\bonsite|\bon-site|\bshift|\brotation|\bovertime|\bremote\b/i, "Yes"],
+    [/\brelocat|\bwilling to (move|travel|work)|\bonsite|\bon-site|\bshift|\brotation|\bovertime/i, "Yes"],
     [/\b(18|eighteen)\b|\blegal age\b|\badult\b/i, "Yes"],
     [/\bdriv(ing|er'?s?)\s*licen[cs]e\b/i, "Yes"],
     [/\bnebosh|iosh|safety\s*(cert|card)|\bhse\b/i, "Yes"],
@@ -67,21 +70,35 @@
     [/\bcivil engineer(ing)?\b.*\b(experience|background)\b/i, "Yes"],
     [/\bsaudi council|\bsce\b/i, F.sce_registered || "No"],
     [/\bp\.?\s*eng\b|\bprofessional engineer\b|\bchartered\b|\brpeq\b|\bcpeng\b/i, "No"],
-    [/\bpreviously (worked|applied|employed)|\bformer employee|\bcurrently (work|employed) (at|with|for)\b/i, "No"],
-    [/\brelative|\bfamily member|\bconflict of interest|\bgovernment official\b/i, "No"],
-    [/\bconvict|\bcriminal|\bfelony\b/i, "No"],
-    [/\bdisabilit|\bveteran\b/i, "No"],
-    [/\b(employment|non-?compete|restrictive)\b.*\bagreement/i, "No"],
-    [/\bagree to\b|\bconsent\b|\backnowledge\b|\bcertify\b|\bprivacy (policy|notice)\b|\bterms (and|&) conditions\b/i, "Yes"],
     [/\bbased in\b|\bcurrently (reside|living|located)\b|\blocal candidate\b/i, inGCC && /bahrain/i.test(JOB.location || "") ? "Yes" : "No"],
-    [/\bnotice\b/i, "Yes"],
   ];
+  // Questions only YOU can answer (legal declarations, consent, history, diversity) are never filled.
+  const PERSONAL = /\bconvict|\bcriminal|\bfelony|\boffen[cs]e|\bdisabilit|\bveteran|\bgender|\bsex\b|\bethnic|\brace\b|\breligio|\bmarital|\bpregnan|\bdate of birth|\bdob\b|\bage\b|\brelative|\bfamily member|\bconflict of interest|\bgovernment official|\bpreviously (worked|applied|employed)|\bformer employee|\bnon-?compete|\bemployment agreement|\brestrictive|\bagree\b|\bconsent|\backnowledge|\bcertify|\bdeclar|\bprivacy|\bterms\b|\bsignature|\bsign here|\bpassword|\bpassport|\bnational id|\bcpr\b|\biqama|\bssn\b|\bsocial security|\bbank|\biban|\bcard number/i;
 
   function answerFor(d) {
     for (const [rx, v] of answersRx) if (rx.test(d)) return v;
     return "";
   }
-  const vis = (el) => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== "hidden" && s.display !== "none"; };
+  // A field counts only if a person could see it: real size, inside the page horizontally, not transparent,
+  // not clipped away, not aria-hidden. Off-screen "honeypot" inputs are never filled.
+  const boxOf = (el) => (el.tagName === "INPUT" && (el.getAttribute("role") === "combobox" || el.getAttribute("aria-autocomplete") === "list")
+    && el.parentElement && (el.parentElement.closest('[class*="control"],[class*="Control"]') ||
+        el.parentElement.closest('[class*="select__container"],[class*="select-container"],[data-automation-id*="select"],[role=group]'))) || el;
+  function vis(el0) {
+    const el = boxOf(el0);
+    const r = el.getBoundingClientRect();
+    const small = el.type === "radio" || el.type === "checkbox";
+    if (r.width < (small ? 10 : 24) || r.height < (small ? 10 : 12)) return false;
+    const docW = Math.max(document.documentElement.scrollWidth, innerWidth);
+    if (r.right + scrollX <= 0 || r.left + scrollX >= docW || r.bottom + scrollY <= 0) return false;
+    for (let n = el; n && n.nodeType === 1; n = n.parentElement) {
+      const s = getComputedStyle(n);
+      if (s.display === "none" || s.visibility === "hidden" || +s.opacity < 0.15) return false;
+      if (n.getAttribute("aria-hidden") === "true" || n.hasAttribute("inert")) return false;
+      if (/inset\(\s*(50|100)%/.test(s.clipPath) || /rect\(\s*0(px)?,?\s*0(px)?,?\s*0(px)?,?\s*0(px)?\s*\)/.test(s.clip)) return false;
+    }
+    return true;
+  }
   const txt = (n) => (n ? (n.innerText || n.textContent || "") : "").replace(/\s+/g, " ").trim();
   function describe(el) {
     const parts = [];
@@ -113,6 +130,7 @@
     return parts.filter(Boolean).join(" | ").slice(0, 400);
   }
   const SET = new WeakMap();     // what we put in each field, so a framework re-render that wipes it can be redone
+  const DONE = new WeakSet();    // fields already handled (kept here, not in the page's DOM)
   function setValue(el, value) {
     SET.set(el, { v: value, n: (SET.get(el) || { n: 0 }).n + 1 });
     const proto = el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
@@ -120,7 +138,7 @@
     el.focus();
     if (setter && setter.set) setter.set.call(el, value); else el.value = value;
     for (const t of ["input", "change", "keyup", "blur"]) el.dispatchEvent(new Event(t, { bubbles: true }));
-    el.setAttribute("data-jobagent", "1");
+    DONE.add(el);
   }
   function chooseOption(sel, wanted) {
     const w = String(wanted).toLowerCase();
@@ -130,13 +148,13 @@
     if (!o) return false;
     sel.focus(); sel.value = o.value;
     for (const t of ["input", "change", "blur"]) sel.dispatchEvent(new Event(t, { bubbles: true }));
-    sel.setAttribute("data-jobagent", "1");
+    DONE.add(sel);
     return true;
   }
   const isCombo = (el) => el.tagName === "INPUT" && !el.closest('[class*="iti"]') && (el.getAttribute("role") === "combobox" || el.getAttribute("aria-autocomplete") === "list" || /select__input|react-select|combobox|autocomplete/i.test((el.className || "") + " " + (el.parentElement && el.parentElement.className || "")));
-  function fillCombo(el, want) {    // the app drives these with real mouse/keyboard input (frameworks ignore synthetic events here)
-    el.setAttribute("data-jobagent", "1"); el.setAttribute("data-jobagent-combo", want);
-  }
+  const COMBOS = [];               // dropdowns the app drives with real mouse/keyboard input
+  let CUR = null, OPT = null;
+  function fillCombo(el, want) { DONE.add(el); COMBOS.push({ el, want }); }
   function valueFor(el, d) {
     for (const [rx, v] of RULES) if (rx.test(d)) return typeof v === "function" ? v(d, el) : v;
     return null;
@@ -148,7 +166,7 @@
     const seenGroups = new Set();
     for (const el of document.querySelectorAll("input, textarea, select")) {
       if (!vis(el) || el.disabled || el.readOnly) continue;
-      if (el.getAttribute("data-jobagent")) {
+      if (DONE.has(el)) {
         const prev = SET.get(el);
         if (prev && prev.n < 4 && el.tagName !== "SELECT" && !el.value) { setValue(el, prev.v); filled++; }   // re-render wiped it
         continue;
@@ -162,7 +180,7 @@
         if (lg) d = txt(lg) + " | " + d; else if (fs && fs.getAttribute("aria-label")) d = fs.getAttribute("aria-label") + " | " + d;
         else { let p = (el.closest("label") || el).parentElement, q = ""; for (let i = 0; p && i < 4 && !q; i++, p = p.parentElement) { for (let s = p.previousElementSibling; s; s = s.previousElementSibling) { if (s.querySelector("input,select,textarea")) break; const t = txt(s); if (t && t.length < 220) { q = t; break; } } } if (q) d = q + " | " + d; }
       }
-      if (!d) continue;
+      if (!d || PERSONAL.test(d)) { DONE.add(el); continue; }
       if (type === "radio" || type === "checkbox") {
         const key = el.name || d; if (seenGroups.has(key)) continue;
         const group = el.name ? [...document.querySelectorAll(`input[name="${CSS.escape(el.name)}"]`)] : [el];
@@ -170,20 +188,18 @@
         const labels = group.map(g => ({ g, t: (txt(g.closest("label")) || txt(document.querySelector(`label[for="${CSS.escape(g.id || "")}"]`)) || "").toLowerCase() }));
         const q = d + " " + labels.map(l => l.t).join(" ");
         let want = yesNoFor(q);
-        if (type === "checkbox" && group.length === 1) {
-          if (/\bagree|\bconsent|\bconfirm|\backnowledge|\bcertify|\bprivacy|\bterms|\baccept\b|\bauthori[sz]e\b/i.test(q)) { el.click(); el.setAttribute("data-jobagent", "1"); filled++; }
-          seenGroups.add(key); continue;
-        }
+        if (type === "checkbox" && group.length === 1) { seenGroups.add(key); DONE.add(el); continue; }   // single tick boxes are yours to tick
+        if (PERSONAL.test(q)) { seenGroups.add(key); group.forEach(g => DONE.add(g)); continue; }
         if (want) {
           const wl = want.toLowerCase();
           let pick = labels.find(l => l.t === wl) || labels.find(l => l.t.startsWith(wl)) || labels.find(l => l.t.includes(wl));
           if (!pick) { // non yes/no groups: country / degree etc.
             const v = valueFor(el, d); if (v) pick = labels.find(l => l.t.includes(String(v).toLowerCase()));
           }
-          if (pick) { pick.g.click(); pick.g.setAttribute("data-jobagent", "1"); filled++; }
+          if (pick) { pick.g.click(); group.forEach(g => DONE.add(g)); filled++; }
         } else {
           const v = valueFor(el, d); const pick = v ? labels.find(l => l.t.includes(String(v).toLowerCase())) : null;
-          if (pick) { pick.g.click(); pick.g.setAttribute("data-jobagent", "1"); filled++; }
+          if (pick) { pick.g.click(); group.forEach(g => DONE.add(g)); filled++; }
         }
         seenGroups.add(key); continue;
       }
@@ -207,36 +223,76 @@
     return filled;
   }
   const SUBMITTED = /application (was )?(sent|submitted|received)|thank you for (applying|your application)|successfully (applied|submitted)|you('ve| have) applied|application complete/i;
-  let total = 0, bar;
+  const ST = { total: 0, filledNow: 0, submitted: false, cvRequested: false, cvCount: 0, armed: AUTO };
+  let bar, msg;
+  // The bar lives in a closed shadow root: the page can't restyle it, read it or find its buttons.
   function bar_() {
-    if (bar && document.body.contains(bar)) return bar;
+    if (bar && document.documentElement.contains(bar)) return;
     bar = document.createElement("div");
-    bar.id = "jobagent-bar";
-    bar.style.cssText = "position:fixed;right:16px;bottom:16px;z-index:2147483647;background:#111827;color:#fff;font:13px/1.4 system-ui,sans-serif;padding:10px 12px;border-radius:10px;box-shadow:0 8px 30px rgba(0,0,0,.35);display:flex;gap:10px;align-items:center";
-    bar.innerHTML = `<b>JobAgent</b><span id="ja-msg">ready</span><button id="ja-fill" style="font:inherit;border:0;border-radius:6px;padding:5px 9px;background:#2563eb;color:#fff;cursor:pointer">Fill again</button><button id="ja-done" style="font:inherit;border:0;border-radius:6px;padding:5px 9px;background:#16a34a;color:#fff;cursor:pointer">I submitted ✓</button><button id="ja-x" style="font:inherit;border:0;background:none;color:#9ca3af;cursor:pointer">×</button>`;
-    document.body.appendChild(bar);
-    bar.querySelector("#ja-fill").onclick = () => run(true);
-    bar.querySelector("#ja-done").onclick = () => mark("Applied");
-    bar.querySelector("#ja-x").onclick = () => bar.remove();
-    return bar;
+    const root = bar.attachShadow({ mode: "closed" });
+    bar.style.cssText = "all:initial;position:fixed;right:16px;bottom:16px;z-index:2147483647";
+    root.innerHTML = `<style>
+      .b{background:#111827;color:#fff;font:13px/1.4 system-ui,sans-serif;padding:10px 12px;border-radius:10px;box-shadow:0 8px 30px rgba(0,0,0,.35);display:flex;gap:8px;align-items:center;max-width:560px;flex-wrap:wrap}
+      button{font:inherit;border:0;border-radius:6px;padding:5px 9px;color:#fff;cursor:pointer}
+      .p{background:#2563eb}.g{background:#16a34a}.c{background:#374151}.x{background:none;color:#9ca3af}</style>
+      <div class="b"><b>JobAgent</b><span id="m"></span>
+      <button class="p" id="fill"></button><button class="c" id="cv">Attach CV</button><button class="g" id="done">I submitted ✓</button><button class="x" id="x">×</button></div>`;
+    msg = root.getElementById("m");
+    const fillBtn = root.getElementById("fill");
+    fillBtn.textContent = ST.armed ? "Fill again" : "Fill this page";
+    const trusted = (fn) => (e) => { if (e.isTrusted) fn(); };            // only real clicks by the person count
+    fillBtn.addEventListener("click", trusted(() => { ST.armed = true; fillBtn.textContent = "Fill again"; run(); }));
+    root.getElementById("cv").addEventListener("click", trusted(() => { ST.cvRequested = true; say("attaching CV…"); }));
+    root.getElementById("done").addEventListener("click", trusted(() => { ST.submitted = true; say("marked as Applied in the app ✓"); }));
+    root.getElementById("x").addEventListener("click", trusted(() => bar.remove()));
+    document.documentElement.appendChild(bar);
+    say(ST.armed ? "ready" : `${HOST} isn't a known job site - check it, then press "Fill this page"`);
   }
-  function say(m) { try { bar_().querySelector("#ja-msg").textContent = m; } catch (_) {} }
-  function mark(status) {
-    say("saving…");
-    fetch(CTX.app + "/api/mark", { method: "POST", mode: "cors", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: JOB.url, status }) })
-      .then(() => say("marked as " + status + " in the app ✓")).catch(() => say("could not reach the app - mark it there"));
-    window.__jobagent.submitted = true;
+  function say(m) { bar_(); msg.textContent = m; }
+  function run() {
+    if (!document.body) return;
+    if (ST.armed) {
+      const n = fillOnce(); ST.total += n; ST.filledNow += n;
+      if (ST.total) say(`filled ${ST.total} field${ST.total > 1 ? "s" : ""} - check them, attach your CV, then press the site's button`);
+      else say("no fields yet - open the apply form");
+    }
+    if (!ST.submitted && SUBMITTED.test((document.body.innerText || "").slice(0, 20000)) && ST.total) {
+      ST.submitted = true; say("looks submitted - marked as Applied in the app ✓");
+    }
   }
-  function run(force) {
-    if (!document.body) return { filled: 0 };
-    const n = fillOnce(); total += n;
-    const sub = SUBMITTED.test((document.body.innerText || "").slice(0, 20000));
-    if (sub && !window.__jobagent.submitted) { mark("Applied"); }
-    say(total ? `filled ${total} field${total > 1 ? "s" : ""} - check, then press the site's button` : "no fields yet - open the apply form");
-    return { filled: n, total, submitted: sub };
+  function cvBoxes() {
+    const all = [...document.querySelectorAll("input[type=file]")].filter(i => !i.disabled);
+    const named = all.filter(i => /\b(cv|resume|résumé|curriculum)\b/i.test(describe(i) + " " + (i.accept || "")));
+    const notOther = all.filter(i => !/\b(cover\s*letter|photo|picture|image|avatar|transcript|certificate|passport|id\b)/i.test(describe(i)));
+    return named.length ? named : (notOther.length === 1 ? notOther : []);
   }
-  window.__jobagent = { run, submitted: false };
-  const mo = new MutationObserver(() => { clearTimeout(window.__jobagent._t); window.__jobagent._t = setTimeout(() => run(false), 700); });
-  const start = () => { bar_(); setTimeout(() => run(false), 1200); setTimeout(() => run(false), 4000); mo.observe(document.body, { childList: true, subtree: true }); };
+  window.__ja = {           // isolated-world API for the app (the page cannot see this object)
+    state() { const s = { ...ST, combos: COMBOS.length }; ST.filledNow = 0; return s; },
+    cvTarget(i) { return cvBoxes()[i] || null; },
+    cvDone(n) { ST.cvRequested = false; ST.cvCount += n; say(n ? "CV attached ✓ - check it shows on the form" : "no CV upload box on this page"); },
+    nextCombo() { CUR = COMBOS.shift() || null; return CUR ? CUR.want : null; },
+    current() { return CUR && document.contains(CUR.el) && vis(CUR.el) ? CUR.el : null; },
+    menuOpen() {
+      const e = document.activeElement;
+      return !!(e && (e.getAttribute("aria-expanded") === "true" || document.querySelector('[role=listbox] [role=option],[class*="select__option"],[class*="menu"] [class*="option"]')));
+    },
+    findOption(want) {
+      const w = String(want).toLowerCase();
+      const notPhone = o => !o.closest('[class*="iti"],[class*="flag"],[class*="dial"]');
+      let opts = [...document.querySelectorAll('[role="option"]')].filter(o => vis(o) && notPhone(o));
+      if (!opts.length) opts = [...document.querySelectorAll('[class*="option"],[class*="Option"]')].filter(o => vis(o) && notPhone(o) && !o.querySelector("input") && o.textContent.trim().length < 120);
+      const t = opts.map(o => ({ o, t: o.textContent.replace(/\s+/g, " ").trim().toLowerCase() }));
+      const yn = (w === "yes" || w === "no");
+      const sw = t.filter(x => x.t === w || x.t.startsWith(w + " ") || x.t.startsWith(w + ",") || x.t.startsWith(w + " -") || x.t === w + ".").sort((a, b) => a.t.length - b.t.length);
+      let h = t.find(x => x.t === w) || null;
+      if (!h && sw.length === 1) h = sw[0]; else if (!h && sw.length > 1 && yn) { OPT = null; return "AMBIGUOUS"; }
+      if (!h && !yn) h = t.find(x => x.t.startsWith(w)) || t.find(x => x.t.includes(w));
+      OPT = h ? h.o : null;
+      return h ? "OK" : (opts.length ? "NONE" : "NOMENU");
+    },
+    option() { return OPT; },
+  };
+  const mo = new MutationObserver(() => { clearTimeout(ST._t); ST._t = setTimeout(run, 700); });
+  const start = () => { bar_(); setTimeout(run, 1200); setTimeout(run, 4000); mo.observe(document.documentElement, { childList: true, subtree: true }); };
   if (document.readyState !== "complete") window.addEventListener("load", start); else start();
 })();

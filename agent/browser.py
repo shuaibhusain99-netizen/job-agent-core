@@ -1,15 +1,17 @@
-"""Apply-on-site helper: drives the user's own browser (Edge/Chrome) over the DevTools protocol - standard library only.
+"""Apply-on-site helper: drives a browser (Edge/Chrome) over the DevTools protocol - standard library only.
 
 The browser runs with its own profile folder (data/browser) so sign-ins to LinkedIn, Bayt, GulfTalent ... are remembered.
-For a job we open its page in a tab, inject filler.js (fills the form fields it recognises, uploads the CV, shows a small
-JobAgent bar) and re-inject it on every navigation. It never presses Submit - the person does.
+For a job we open its page in a tab and run filler.js in an ISOLATED WORLD (like a password manager): the page cannot read
+the profile, the cover letter or the filler's state, and cannot tamper with the script's built-ins.
+Safety rules (see filler.js): auto-fill only on the job's own site and known job boards; only fields actually on screen;
+the CV is attached only after the person clicks "Attach CV"; consent / legal declarations are never ticked; nothing is
+ever submitted - the person presses the site's own button.
 """
 from __future__ import annotations
-import base64, json, os, socket, struct, subprocess, sys, threading, time, urllib.request
+import base64, json, os, socket, struct, subprocess, threading, time, urllib.request
 from pathlib import Path
 from urllib.parse import urlparse
 
-PORT = 9333
 HERE = Path(__file__).resolve().parent
 
 
@@ -94,35 +96,67 @@ class WS:
             pass
 
 
-# ------------------------------------------------------------------ CDP session on one tab
+
+# ------------------------------------------------------------------ CDP session on one tab (responses + events)
 class Tab:
     def __init__(self, ws_url: str):
         self.ws = WS(ws_url)
+        self.ws.sock.settimeout(None)
         self.n = 0
         self.lock = threading.Lock()
+        self.waiting: dict[int, dict] = {}
+        self.cv = threading.Condition()
+        self.listeners: list = []
+        self.closed = False
+        threading.Thread(target=self._reader, daemon=True).start()
+
+    def _reader(self):
+        try:
+            while True:
+                msg = json.loads(self.ws.recv())
+                if "id" in msg:
+                    with self.cv:
+                        self.waiting[msg["id"]] = msg
+                        self.cv.notify_all()
+                else:
+                    for fn in list(self.listeners):
+                        try:
+                            fn(msg.get("method"), msg.get("params") or {})
+                        except Exception:
+                            pass
+        except Exception:
+            self.closed = True
+            with self.cv:
+                self.cv.notify_all()
 
     def call(self, method: str, timeout: float = 30, **params):
         with self.lock:
             self.n += 1
             mid = self.n
-            self.ws.send(json.dumps({"id": mid, "method": method, "params": params}))
-            self.ws.sock.settimeout(timeout)
-            while True:
-                msg = json.loads(self.ws.recv())
-                if msg.get("id") == mid:
-                    if "error" in msg:
-                        raise RuntimeError(f"{method}: {msg['error'].get('message')}")
-                    return msg.get("result", {})
-
-    def eval(self, expr: str, timeout: float = 30):
-        r = self.call("Runtime.evaluate", timeout=timeout, expression=expr, returnByValue=True, awaitPromise=True)
-        return r.get("result", {}).get("value")
+        self.ws.send(json.dumps({"id": mid, "method": method, "params": params}))
+        end = time.time() + timeout
+        with self.cv:
+            while mid not in self.waiting:
+                if self.closed:
+                    raise ConnectionError("tab closed")
+                left = end - time.time()
+                if left <= 0:
+                    raise TimeoutError(method)
+                self.cv.wait(left)
+            msg = self.waiting.pop(mid)
+        if "error" in msg:
+            raise RuntimeError(f"{method}: {msg['error'].get('message')}")
+        return msg.get("result", {})
 
     def close(self):
+        self.closed = True
         self.ws.close()
 
 
 # ------------------------------------------------------------------ browser process
+_STATE = {"port": 0, "proc": None}
+
+
 def find_browser() -> str | None:
     env = os.environ.get("JOBAGENT_BROWSER")
     if env and Path(env).exists():
@@ -142,177 +176,269 @@ def find_browser() -> str | None:
     return None
 
 
-def _alive() -> bool:
+def _free_port() -> int:
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    p = s.getsockname()[1]
+    s.close()
+    return p
+
+
+def _version(port: int) -> dict | None:
     try:
-        urllib.request.urlopen(f"http://127.0.0.1:{PORT}/json/version", timeout=2).read()
-        return True
+        return json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/json/version", timeout=2).read())
     except Exception:
-        return False
+        return None
 
 
-def launch(profile_dir: Path, headless: bool = False) -> str:
-    """Start the browser with remote debugging if it isn't running. Returns the executable used."""
-    if _alive():
-        return "running"
+def launch(profile_dir: Path, headless: bool = False) -> int:
+    """Start our own browser on a random local debugging port (never re-use a browser we did not start). Returns the port."""
+    proc = _STATE["proc"]
+    if proc is not None and proc.poll() is None and _version(_STATE["port"]):
+        return _STATE["port"]
     exe = find_browser()
     if not exe:
         raise RuntimeError("No browser found. Install Microsoft Edge or Google Chrome.")
     profile_dir.mkdir(parents=True, exist_ok=True)
-    args = [exe, f"--remote-debugging-port={PORT}", f"--user-data-dir={profile_dir}", "--no-first-run", "--no-default-browser-check",
-            "--disable-features=TranslateUI", "--new-window", "about:blank"]
+    port = _free_port()
+    args = [exe, f"--remote-debugging-port={port}", "--remote-debugging-address=127.0.0.1", f"--user-data-dir={profile_dir}",
+            "--no-first-run", "--no-default-browser-check", "--disable-features=TranslateUI", "--new-window", "about:blank"]
     if headless:
         args += ["--headless=new", "--disable-gpu", "--no-sandbox"]
     kw = {}
     if os.name == "nt":
-        kw["creationflags"] = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-    subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **kw)
+        kw["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **kw)
     for _ in range(60):
-        if _alive():
-            return exe
+        if _version(port):
+            _STATE.update(port=port, proc=proc)
+            return port
+        if proc.poll() is not None:
+            break
         time.sleep(0.5)
-    raise RuntimeError("Browser did not start")
+    raise RuntimeError("The browser did not start. If it is already open with this profile, close it and try again.")
 
 
-def open_tab(url: str) -> dict:
-    body = urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:{PORT}/json/new?{url}", method="PUT"), timeout=10).read()
-    return json.loads(body)
+def close_browser():
+    """Close the browser we started (called when the app exits) so its debugging port doesn't stay open."""
+    v = _version(_STATE["port"]) if _STATE["port"] else None
+    if v and v.get("webSocketDebuggerUrl"):
+        try:
+            ws = WS(v["webSocketDebuggerUrl"], timeout=3)
+            ws.send(json.dumps({"id": 1, "method": "Browser.close"}))
+            ws.close()
+        except Exception:
+            pass
+    proc = _STATE["proc"]
+    if proc is not None and proc.poll() is None:
+        try:
+            proc.terminate()
+        except Exception:
+            pass
 
 
-def tabs() -> list[dict]:
-    return json.loads(urllib.request.urlopen(f"http://127.0.0.1:{PORT}/json/list", timeout=5).read())
+def open_tab(port: int) -> dict:
+    req = urllib.request.Request(f"http://127.0.0.1:{port}/json/new?about:blank", method="PUT")
+    return json.loads(urllib.request.urlopen(req, timeout=10).read())
 
 
 # ------------------------------------------------------------------ the filler
-def filler_script(profile: dict, job: dict, app_url: str) -> str:
+TRUSTED_HOSTS = [
+    "linkedin.com", "myworkdayjobs.com", "myworkdaysite.com", "workday.com", "successfactors.com", "successfactors.eu", "sapsf.com",
+    "greenhouse.io", "lever.co", "workable.com", "smartrecruiters.com", "bayt.com", "gulftalent.com", "naukrigulf.com", "seek.com.au",
+    "indeed.com", "taleo.net", "oraclecloud.com", "icims.com", "jobvite.com", "ashbyhq.com", "bamboohr.com", "recruitee.com",
+    "teamtailor.com", "zohorecruit.com", "rigzone.com", "jobs.ca", "jobbank.gc.ca", "applytojob.com", "breezy.hr", "personio.de",
+    "personio.com", "pinpointhq.com", "dayforcehcm.com", "ultipro.com", "ukg.com", "adp.com", "paylocity.com", "csod.com",
+]
+
+
+def _host_ok(url: str) -> bool:
+    u = urlparse(url)
+    return u.scheme in ("http", "https") and bool(u.hostname)
+
+
+def filler_script(profile: dict, job: dict, years: int) -> str:
     js = (HERE / "filler.js").read_text(encoding="utf-8")
-    ctx = {"profile": profile, "job": {k: job.get(k, "") for k in ("url", "title", "company", "country", "location", "apply_email")},
-           "cover_letter": job.get("cover_letter", ""), "app": app_url}
-    return js.replace("__JOBAGENT_CONTEXT__", json.dumps(ctx, ensure_ascii=False))
+    host = (urlparse(job.get("url", "")).hostname or "").lower()
+    ctx = {"profile": {k: profile.get(k) for k in ("candidate", "form_answers", "screening_answers")},
+           "years": years,
+           "job": {k: job.get(k, "") for k in ("title", "company", "country", "location")},
+           "cover_letter": job.get("cover_letter", ""),
+           "hosts": sorted(set(TRUSTED_HOSTS + ([host[4:] if host.startswith("www.") else host] if host else [])))}
+    # JSON is a JS literal; escape "</" and U+2028/9 so it can never break out of the script
+    lit = json.dumps(ctx, ensure_ascii=True).replace("</", "<\\/")
+    return js.replace("__JOBAGENT_CONTEXT__", lit)
 
 
 class ApplySession:
-    """One job open in one tab: injects the filler now and on every navigation, uploads the CV when a file input appears."""
+    """One job in one tab. The filler runs in an isolated world on every page of that tab; this loop polls its state,
+    attaches the CV when the person asks, drives dropdowns with real input, and reports submission."""
 
-    def __init__(self, url: str, profile: dict, job: dict, cv_path: Path | None, app_url: str, headless: bool = False, profile_dir: Path | None = None):
-        self.url, self.profile, self.job, self.cv, self.app_url = url, profile, job, cv_path, app_url
-        launch(profile_dir or Path("browser"), headless=headless)
-        info = open_tab(url)
-        self.tab_id = info["id"]
+    def __init__(self, url: str, profile: dict, job: dict, cv_path: Path | None, years: int, on_submitted=None,
+                 headless: bool = False, profile_dir: Path | None = None):
+        if not _host_ok(url):
+            raise ValueError("Only http(s) job links can be opened")
+        self.url, self.cv, self.on_submitted = url, cv_path, on_submitted
+        self.world = "jobagent_" + base64.b32encode(os.urandom(10)).decode().lower().rstrip("=")
+        port = launch(profile_dir or Path("browser"), headless=headless)
+        info = open_tab(port)
         self.tab = Tab(info["webSocketDebuggerUrl"])
+        self.ctx_id = None
+        self.ctx_ids: list[int] = []          # isolated contexts of the main frame (Chrome may add empty ones)
+        self.tab.listeners.append(self._on_event)
         self.tab.call("Page.enable")
+        self.main_frame = self.tab.call("Page.getFrameTree")["frameTree"]["frame"]["id"]
         self.tab.call("Runtime.enable")
         self.tab.call("DOM.enable")
         try:
-            self.tab.call("Emulation.setFocusEmulationEnabled", enabled=True)   # focus events even when the window isn't foreground
+            self.tab.call("Emulation.setFocusEmulationEnabled", enabled=True)
         except Exception:
             pass
-        script = filler_script(profile, job, app_url)
-        self.tab.call("Page.addScriptToEvaluateOnNewDocument", source=script)
-        self.script = script
+        self.tab.call("Page.addScriptToEvaluateOnNewDocument", source=filler_script(profile, job, years), worldName=self.world)
+        self.tab.call("Page.navigate", url=url)
         self.stop = False
+        self.done = False
         self.log: list[str] = []
         threading.Thread(target=self._loop, daemon=True).start()
 
-    def _loop(self):
-        time.sleep(1.5)
-        last_fill = 0
-        while not self.stop:
+    # --- isolated-world plumbing
+    def _on_event(self, method, p):
+        if method == "Runtime.executionContextCreated":
+            c = p.get("context", {})
+            aux = c.get("auxData") or {}
+            if c.get("name") == self.world and aux.get("frameId") == self.main_frame:
+                self.ctx_ids.append(c["id"])
+        elif method == "Runtime.executionContextsCleared":
+            self.ctx_id, self.ctx_ids = None, []
+        elif method == "Runtime.executionContextDestroyed":
+            cid = p.get("executionContextId")
+            if cid in self.ctx_ids:
+                self.ctx_ids.remove(cid)
+            if cid == self.ctx_id:
+                self.ctx_id = None
+        elif method == "Inspector.detached" or method == "Target.targetDestroyed":
+            self.stop = True
+
+    def _find_ctx(self):
+        """The isolated context where the filler actually runs (it defines __ja)."""
+        for cid in reversed(list(self.ctx_ids)):
             try:
-                # the filler is a no-op when it already ran on this document; re-run picks up fields that appeared later
-                res = self.tab.eval("(window.__jobagent && window.__jobagent.run()) || 'no-filler'", timeout=15)
-                if res == "no-filler":
-                    self.tab.eval(self.script, timeout=15)
-                    res = self.tab.eval("window.__jobagent && window.__jobagent.run()", timeout=15)
-                if isinstance(res, dict) and res.get("filled"):
-                    last_fill = time.time()
-                    self.log.append(f"filled {res['filled']} field(s)")
-                if self.cv and self.cv.exists():
-                    self._upload_cv()
-                self._combos()
-                if isinstance(res, dict) and res.get("submitted"):
-                    self.log.append("submitted")
-                    self.stop = True
-            except Exception as e:  # tab closed etc.
-                self.log.append(f"stopped: {e}")
-                if "closed" in str(e).lower() or "No target" in str(e):
-                    self.stop = True
-            time.sleep(2.5)
+                r = self.tab.call("Runtime.evaluate", expression="typeof window.__ja", contextId=cid, returnByValue=True, timeout=5)
+                if r.get("result", {}).get("value") == "object":
+                    self.ctx_id = cid
+                    return
+            except Exception:
+                continue
+
+    def _eval(self, expr: str, by_value: bool = True, timeout: float = 15):
+        if not self.ctx_id or self.ctx_id not in self.ctx_ids:
+            self.ctx_id = None
+            self._find_ctx()
+        if not self.ctx_id:
+            return None
+        r = self.tab.call("Runtime.evaluate", timeout=timeout, expression=expr, contextId=self.ctx_id,
+                          returnByValue=by_value, awaitPromise=True)
+        res = r.get("result", {})
+        return res.get("value") if by_value else res.get("objectId")
+
+    def _on(self, obj: str, fn: str, *args):
+        r = self.tab.call("Runtime.callFunctionOn", objectId=obj, functionDeclaration=fn,
+                          arguments=[{"value": a} for a in args], returnByValue=True)
+        return r.get("result", {}).get("value")
+
+    # --- main loop
+    def _loop(self):
+        while not self.stop and not self.tab.closed:
+            try:
+                st = self._eval("window.__ja ? __ja.state() : null")
+                if isinstance(st, dict):
+                    if st.get("filledNow"):
+                        self.log.append(f"filled {st['filledNow']} field(s)")
+                    if st.get("cvRequested") and self.cv and self.cv.exists():
+                        self._attach_cv()
+                    if st.get("combos"):
+                        self._combos()
+                    if st.get("submitted") and not self.done:
+                        self.done = True
+                        self.log.append("submitted")
+                        if self.on_submitted:
+                            self.on_submitted()
+            except (ConnectionError, OSError):
+                break
+            except Exception as e:
+                self.log.append(f"note: {str(e)[:80]}")
+            time.sleep(1.5)
+        self.stop = True
+        if not self.done:
+            self.log.append("window closed")
         try:
             self.tab.close()
         except Exception:
             pass
 
-    def _click(self, nid: int):
-        obj = self.tab.call("DOM.resolveNode", nodeId=nid)["object"]["objectId"]
-        self.tab.call("Runtime.callFunctionOn", objectId=obj, functionDeclaration="function(){document.documentElement.style.scrollBehavior='auto';this.scrollIntoView({block:'center',behavior:'instant'})}")
+    def _attach_cv(self):
+        n = 0
+        for i in range(6):
+            obj = self._eval(f"__ja.cvTarget({i})", by_value=False)
+            if not obj:
+                break
+            try:
+                self.tab.call("DOM.setFileInputFiles", objectId=obj, files=[str(self.cv)])
+                self._on(obj, "function(){this.dispatchEvent(new Event('change',{bubbles:true}))}")
+                n += 1
+            except Exception as e:
+                self.log.append(f"CV not attached: {str(e)[:60]}")
+        self._eval(f"__ja.cvDone({n})")
+        self.log.append(f"CV attached ({n})" if n else "no CV upload box found on this page")
+
+    def _point(self, obj: str):
+        self._on(obj, "function(){document.documentElement.style.scrollBehavior='auto';this.scrollIntoView({block:'center',behavior:'instant'})}")
         time.sleep(0.25)
-        q = self.tab.call("DOM.getContentQuads", nodeId=nid)["quads"][0]
-        x, y = (q[0] + q[2]) / 2, (q[1] + q[5]) / 2
-        self.tab.call("Input.dispatchMouseEvent", type="mouseMoved", x=x, y=y)
-        self.tab.call("Input.dispatchMouseEvent", type="mousePressed", x=x, y=y, button="left", clickCount=1)
-        self.tab.call("Input.dispatchMouseEvent", type="mouseReleased", x=x, y=y, button="left", clickCount=1)
+        q = self.tab.call("DOM.getContentQuads", objectId=obj)["quads"][0]
+        return (q[0] + q[2]) / 2, (q[1] + q[5]) / 2
+
+    def _click(self, obj: str) -> bool:
+        """Real mouse click on an element - only if the element (not something laid over it) is what's under the pointer."""
+        x, y = self._point(obj)
+        if not self._on(obj, "function(x,y){const h=document.elementFromPoint(x,y);if(!h)return false;"
+                             "const box=this.closest('[class*=control],[role=combobox],[class*=select]')||this;"
+                             "return h===this||this.contains(h)||h.contains(this)&&h.getBoundingClientRect().width<=box.getBoundingClientRect().width*1.5||box.contains(h);}", x, y):
+            self.log.append("skipped a click: something was covering the field")
+            return False
+        for t in ("mouseMoved", "mousePressed", "mouseReleased"):
+            self.tab.call("Input.dispatchMouseEvent", type=t, x=x, y=y, button="left", clickCount=1)
+        return True
 
     def _key(self, key: str, code: int):
         self.tab.call("Input.dispatchKeyEvent", type="keyDown", key=key, code=key, windowsVirtualKeyCode=code)
         self.tab.call("Input.dispatchKeyEvent", type="keyUp", key=key, code=key, windowsVirtualKeyCode=code)
 
     def _combos(self):
-        """Dropdown-style inputs (react-select, Workday, LinkedIn typeaheads): click, type the value, pick the matching option."""
+        """Dropdown-style inputs (react-select, Workday, LinkedIn typeaheads): click, type the value, pick the exact option."""
         for _ in range(6):
-            doc = self.tab.call("DOM.getDocument", depth=-1, pierce=True)
-            nid = self.tab.call("DOM.querySelector", nodeId=doc["root"]["nodeId"], selector="[data-jobagent-combo]").get("nodeId")
-            if not nid:
+            want = self._eval("__ja.nextCombo()")
+            if not want:
                 break
+            el = self._eval("__ja.current()", by_value=False)
+            if not el:
+                continue
             try:
-                attrs = self.tab.call("DOM.getAttributes", nodeId=nid)["attributes"]
-                want = attrs[attrs.index("data-jobagent-combo") + 1]
-                self.tab.call("DOM.removeAttribute", nodeId=nid, name="data-jobagent-combo")
                 self._key("Escape", 27)
-                self._click(nid)
-                time.sleep(0.5)
-                opened = self.tab.eval("(()=>{const e=document.activeElement;return !!(e&&(e.getAttribute('aria-expanded')==='true'||document.querySelector('[role=listbox]:not([class*=iti]) [role=option],[class*=\"select__option\"],[class*=\"menu\"] [class*=\"option\"]')))})()")
-                if not opened:
-                    self._click(nid); time.sleep(0.5)
-                self.tab.call("Input.insertText", text=want[:40])
-                time.sleep(0.9)
-                w = json.dumps(want.lower())
-                hit = self.tab.eval(f"""(()=>{{const w={w};const vis=e=>{{const r=e.getBoundingClientRect();return r.width>0&&r.height>0}};
-                    const notPhone=o=>!o.closest('[class*="iti"],[class*="flag"],[class*="dial"]');
-                    let opts=[...document.querySelectorAll('[role="option"]')].filter(o=>vis(o)&&notPhone(o));
-                    if(!opts.length) opts=[...document.querySelectorAll('[class*="option"],[class*="Option"]')].filter(o=>vis(o)&&notPhone(o)&&!o.querySelector('input')&&o.textContent.trim().length<120);
-                    const t=opts.map(o=>({{o,t:o.textContent.replace(/\\s+/g,' ').trim().toLowerCase()}}));
-                    const yn=(w==='yes'||w==='no');
-                    const sw=t.filter(x=>x.t===w||x.t.startsWith(w+' ')||x.t.startsWith(w+',')||x.t.startsWith(w+' -')||x.t===w+'.').sort((a,b)=>a.t.length-b.t.length);
-                    let h=t.find(x=>x.t===w)||null;
-                    if(!h&&sw.length===1) h=sw[0]; else if(!h&&sw.length>1&&yn) return 'AMBIGUOUS';
-                    if(!h&&!yn) h=t.find(x=>x.t.startsWith(w))||t.find(x=>x.t.includes(w));
-                    if(!h) return opts.length?null:'NOMENU'; h.o.setAttribute('data-jobagent-pick','1'); return h.t;}})()""")
-                if hit in ("AMBIGUOUS", "NOMENU", None):
-                    if os.environ.get("JOBAGENT_DEBUG"):
-                        self.log.append("options seen: " + str(self.tab.eval("[...document.querySelectorAll('[role=option],[class*=option]')].filter(o=>{const r=o.getBoundingClientRect();return r.width>0}).map(o=>o.textContent.trim().slice(0,30)).slice(0,8)"))
-                                        + " active=" + str(self.tab.eval("(document.activeElement||{}).id")))
-                    self._key("Escape", 27)
-                    self.log.append(f"left for you: '{want}' ({'several options match' if hit == 'AMBIGUOUS' else 'no matching option'})")
-                    time.sleep(0.3)
+                if not self._click(el):
                     continue
-                if hit:
-                    doc = self.tab.call("DOM.getDocument", depth=-1, pierce=True)
-                    pick = self.tab.call("DOM.querySelector", nodeId=doc["root"]["nodeId"], selector="[data-jobagent-pick]")["nodeId"]
-                    self._click(pick)
-                    self.tab.eval("document.querySelectorAll('[data-jobagent-pick]').forEach(e=>e.removeAttribute('data-jobagent-pick'))")
-                self.log.append(f"chose '{hit or want}'")
+                time.sleep(0.5)
+                if not self._eval("__ja.menuOpen()"):
+                    self._click(el); time.sleep(0.5)
+                self.tab.call("Input.insertText", text=str(want)[:40])
+                time.sleep(0.9)
+                code = self._eval(f"__ja.findOption({json.dumps(str(want))})")
+                if code != "OK":
+                    self._key("Escape", 27)
+                    self.log.append(f"left for you: '{want}' ({'several options match' if code == 'AMBIGUOUS' else 'no matching option'})")
+                    continue
+                opt = self._eval("__ja.option()", by_value=False)
+                if opt and self._click(opt):
+                    self.log.append(f"chose '{want}'")
                 time.sleep(0.4)
             except Exception as e:
                 self.log.append(f"dropdown skipped: {str(e)[:60]}")
-
-    def _upload_cv(self):
-        """Set the CV on every empty file input (JS can't do this; DevTools can)."""
-        doc = self.tab.call("DOM.getDocument", depth=-1, pierce=True)
-        ids = self.tab.call("DOM.querySelectorAll", nodeId=doc["root"]["nodeId"], selector="input[type=file]:not([data-jobagent-cv])").get("nodeIds", [])
-        for nid in ids:
-            try:
-                self.tab.call("DOM.setFileInputFiles", nodeId=nid, files=[str(self.cv)])
-                self.tab.call("DOM.setAttributeValue", nodeId=nid, name="data-jobagent-cv", value="1")
-                self.log.append("CV attached")
-            except Exception:
-                pass

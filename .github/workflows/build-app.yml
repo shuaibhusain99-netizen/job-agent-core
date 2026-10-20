@@ -22,19 +22,27 @@ jobs:
           --hidden-import main --hidden-import agent --hidden-import agent.sources --hidden-import agent.score
           --hidden-import agent.tailor --hidden-import agent.tracker --hidden-import agent.util --hidden-import agent.browser
           app.py
+      - name: Check Windows-only parts (password encryption)
+        shell: pwsh
+        run: |
+          python -c "import app; b=app._dpapi(b'secret-123', True); assert app._dpapi(b, False)==b'secret-123'; print('DPAPI ok')"
       - name: Smoke test
         shell: pwsh
         run: |
           $p = Start-Process -FilePath dist\JobAgent.exe -ArgumentList "--no-browser" -PassThru
-          Start-Sleep -Seconds 6
-          $r = Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8765/api/status
+          Start-Sleep -Seconds 8
+          $page = (Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8765/).Content
+          $tok = [regex]::Match($page, 'const TOKEN = "([^"]+)"').Groups[1].Value
+          if (-not $tok -or $tok -eq "__JOBAGENT_TOKEN__") { throw "token not written into the page" }
+          $r = Invoke-WebRequest -UseBasicParsing -Headers @{ "X-JobAgent-Token" = $tok } http://127.0.0.1:8765/api/status
           if ($r.StatusCode -ne 200) { throw "app did not answer" }
+          try { Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8765/api/status | Out-Null; throw "API answered without token" } catch { if ($_.Exception.Response.StatusCode.value__ -ne 403) { throw } }
           Stop-Process -Id $p.Id -Force
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
           name: Job Agent (Windows)
-          body: "Download JobAgent.exe, put it in a folder of your choice, double-click. Data is kept in a `data` folder next to it."
+          body: "Private build. Put JobAgent.exe in a folder of your choice and double-click. Your data is kept in a `data` folder next to it, on your PC only."
           files: dist/JobAgent.exe
           prerelease: false

@@ -11,7 +11,7 @@ your browser. All data lives in a `data` folder next to the program:
   JobAgent.exe --run      search once without opening the app (used by the daily scheduled task)
 """
 from __future__ import annotations
-import argparse, base64, csv, io, json, os, shutil, smtplib, ssl, subprocess, sys, threading, time, webbrowser
+import argparse, base64, hmac, io, json, os, re, secrets, shutil, smtplib, ssl, subprocess, sys, threading, time, webbrowser
 from email.message import EmailMessage
 from email.utils import formataddr
 from datetime import datetime
@@ -24,12 +24,13 @@ BUNDLE = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))      # 
 HOME = Path(sys.executable).resolve().parent if FROZEN else Path(__file__).resolve().parent
 DATA = HOME / "data"
 PORT = 8765
-PUBLIC_PATH = "/api/mark"
+TOKEN = secrets.token_urlsafe(24)       # per-launch secret written into the page; every /api call must carry it
 PRIVATE_FILES = {"mail.json", "CV.pdf"}
 PRIVATE_DIRS = {"browser", "sent"}
 
 
 def ensure_data():
+    from agent import tracker
     DATA.mkdir(exist_ok=True)
     (DATA / "applications").mkdir(exist_ok=True)
     for name in ("profile.json", "keys.json", "sources.json"):
@@ -37,118 +38,139 @@ def ensure_data():
             shutil.copy(BUNDLE / name, DATA / name)
     upgrade_config()
     if not (DATA / "tracker.csv").exists():
-        (DATA / "tracker.csv").write_text("﻿found_date,score,verdict,title,company,location,country,source,url,status,applied_date,notes,pack_file,user_notes,category,sector,salary,apply_email\n", encoding="utf-8")
+        tracker.write(DATA / "tracker.csv", {})
 
 
-def _merge(dst, src, path=""):
-    """Add keys/items a newer program version introduced, without touching the user's own settings."""
+# Rule sets the program owns: replaced when a newer program version ships new rules (_rules_version goes up).
+# Your own facts and choices (candidate, form answers, evidence, countries, queries, minimum scores) are never changed.
+RULE_KEYS = ("hard_reject_patterns", "title_reject_patterns", "title_penalties", "title_penalty_exempt", "sectors", "work_rights",
+             "screening_answers", "target_titles", "keyword_points")
+CATEGORY_RULE_KEYS = ("target_titles", "keyword_points", "requires_sector", "require_any", "label")
+
+
+def _add_missing(dst: dict, src: dict) -> bool:
     changed = False
-    if isinstance(dst, dict) and isinstance(src, dict):
-        for k, v in src.items():
-            if k not in dst:
-                dst[k] = v; changed = True
-            elif isinstance(v, (dict, list)) and isinstance(dst[k], type(v)):
-                changed = _merge(dst[k], v, path + "/" + k) or changed
-    elif isinstance(dst, list) and isinstance(src, list):
-        if all(isinstance(x, str) for x in src):                      # word lists: union
-            have = {x.lower() for x in dst if isinstance(x, str)}
-            for x in src:
-                if x.lower() not in have:
-                    dst.append(x); changed = True
-        elif all(isinstance(x, dict) for x in src):                   # boards / sites: add new ones by name
-            key = lambda d: (d.get("company") or d.get("name") or d.get("account") or json.dumps(d, sort_keys=True))
-            have = {key(d) for d in dst if isinstance(d, dict)}
-            for d in src:
-                if key(d) not in have:
-                    dst.append(d); changed = True
+    for k, v in src.items():
+        if k not in dst:
+            dst[k] = v; changed = True
+        elif isinstance(v, dict) and isinstance(dst[k], dict):
+            changed = _add_missing(dst[k], v) or changed
     return changed
 
 
 def upgrade_config():
-    """profile.json / sources.json in the data folder gain whatever the bundled copies added (new sources, categories ...)."""
-    for name in ("profile.json", "sources.json"):
-        try:
-            user = json.loads((DATA / name).read_text(encoding="utf-8"))
-            bundled = json.loads((BUNDLE / name).read_text(encoding="utf-8"))
-            changed = _merge(user, bundled)
-            if name == "profile.json":                       # settings this version retired
-                for k in ("fresh graduate", "oil & gas", "oil and gas"):
-                    if k in user.get("title_penalties", {}):
-                        user["title_penalties"].pop(k); changed = True
-                if user.get("title_penalties", {}).get("intern", 0) < -15:
-                    user["title_penalties"]["intern"] = -15; changed = True
-                retired = {r"\b(1[0-9]|[2-9][0-9])\+?\s*(years|yrs)", r"\b(7|8|9)\s*(-|to|–)\s*(1[0-9]|[2-9][0-9])\s*(years|yrs)",
-                           r"\bminimum\s+(7|8|9|1[0-9])\s*(years|yrs)", r"\b(7|8|9)\+\s*(years|yrs)", r"\bsaudi\s+nationals?\s+only\b",
-                           r"\bfor\s+saudis\s+only\b", r"\b(bachelor|degree)\s+in\s+(electrical|mechanical|chemical|computer)\s+engineering\b"}
-                hr = user.get("hard_reject_patterns", [])
-                if any(x in retired for x in hr):
-                    user["hard_reject_patterns"] = [x for x in hr if x not in retired]; changed = True
-                for c in user.get("search", {}).get("countries", {}).values():
-                    if isinstance(c, dict) and c.get("weight", 1.0) != 1.0:
-                        c["weight"] = 1.0; changed = True
-            if changed:
-                (DATA / name).write_text(json.dumps(user, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-        except Exception as e:  # noqa
-            print(f"config upgrade skipped for {name}: {e}")
-    # older tracker files: add the new columns
+    """Bring the data folder's settings up to this program version - once per version, never undoing your own edits."""
+    from agent import tracker
     try:
-        t = DATA / "tracker.csv"
-        head = t.read_text(encoding="utf-8-sig").splitlines()[0] if t.exists() else ""
-        missing = [c for c in ("sector", "salary", "apply_email") if head and c not in head.split(",")]
-        if missing:
-            import csv, io
-            rows = list(csv.DictReader(io.StringIO(t.read_text(encoding="utf-8-sig"))))
-            fields = head.split(",") + missing
-            with t.open("w", encoding="utf-8-sig", newline="") as f:
-                w = csv.DictWriter(f, fieldnames=fields); w.writeheader(); w.writerows(rows)
+        user = json.loads((DATA / "profile.json").read_text(encoding="utf-8"))
+        bundled = json.loads((BUNDLE / "profile.json").read_text(encoding="utf-8"))
+        if int(user.get("_rules_version", 0)) < int(bundled.get("_rules_version", 0)):
+            for k in RULE_KEYS:
+                if k in bundled:
+                    user[k] = bundled[k]
+            ucat = user.setdefault("categories", {})
+            for name, cat in bundled.get("categories", {}).items():
+                if not isinstance(cat, dict):
+                    ucat.setdefault(name, cat); continue
+                mine = ucat.setdefault(name, {})
+                for k in CATEGORY_RULE_KEYS:
+                    if k in cat:
+                        mine[k] = cat[k]
+                    else:
+                        mine.pop(k, None)
+            us, bs = user.setdefault("search", {}), bundled.get("search", {})
+            for k, v in bs.items():                          # new search settings and query lists for new sections
+                if k not in us:
+                    us[k] = v
+            _add_missing(user, bundled)                      # brand-new sections (e.g. form_answers)
+            user["_rules_version"] = bundled["_rules_version"]
+            tracker.atomic_write(DATA / "profile.json", json.dumps(user, indent=2, ensure_ascii=False) + "\n")
     except Exception as e:  # noqa
-        print(f"tracker upgrade skipped: {e}")
+        print(f"profile upgrade skipped: {e}")
+    try:
+        user = json.loads((DATA / "sources.json").read_text(encoding="utf-8"))
+        bundled = json.loads((BUNDLE / "sources.json").read_text(encoding="utf-8"))
+        if int(user.get("_version", 0)) < int(bundled.get("_version", 0)):
+            tracker.atomic_write(DATA / "sources.json", json.dumps(bundled, indent=2, ensure_ascii=False) + "\n")   # sources are program-owned
+    except Exception as e:  # noqa
+        print(f"sources upgrade skipped: {e}")
 
 
 # ----------------------------------------------------------------------------- agent run
 STATE = {"running": False, "log": [], "started": "", "finished": "", "summary": ""}
+RUN_LOCK = "search.lock"
 
 
-def run_agent(block: bool = False):
-    if STATE["running"]:
-        return
+def _claim_run() -> bool:
+    """One search at a time - across the app and the scheduled task. A lock older than 3 hours is from a crash."""
+    lf = DATA / RUN_LOCK
+    try:
+        fd = os.open(lf, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        try:
+            if time.time() - lf.stat().st_mtime > 3 * 3600:
+                lf.unlink()
+                return _claim_run()
+        except OSError:
+            pass
+        return False
+    os.write(fd, f"{os.getpid()} {datetime.now().isoformat(timespec='seconds')}".encode())
+    os.close(fd)
+    return True
+
+
+def run_agent(block: bool = False) -> bool:
+    if STATE["running"] or not _claim_run():
+        STATE["log"].append("A search is already running (in the app or the daily task).")
+        return False
+
     def work():
         STATE.update(running=True, log=[], started=datetime.now().isoformat(timespec="seconds"), finished="", summary="")
-        import main as agent_main
-        agent_main.ROOT = DATA
-        agent_main.PROFILE = json.loads((DATA / "profile.json").read_text(encoding="utf-8"))
-        agent_main.SOURCES = json.loads((DATA / "sources.json").read_text(encoding="utf-8"))
-        agent_main.TRACKER = DATA / "tracker.csv"
-        agent_main.REPORTS = DATA / "reports"
-        agent_main.PACKS = DATA / "applications"
-        import agent.sources as srcmod
-        srcmod.KEYS_PATH = DATA / "keys.json"
         buf = io.StringIO()
+
         class Tee(io.TextIOBase):
             def write(self, s):
                 buf.write(s)
                 for line in s.splitlines():
                     if line.strip():
                         STATE["log"].append(line.strip()[:200])
+                        del STATE["log"][:-200]
                 return len(s)
         old_err, old_out = sys.stderr, sys.stdout
         sys.stderr = sys.stdout = Tee()
         try:
+            import main as agent_main
+            agent_main.ROOT = DATA
+            agent_main.PROFILE = json.loads((DATA / "profile.json").read_text(encoding="utf-8"))
+            agent_main.SOURCES = json.loads((DATA / "sources.json").read_text(encoding="utf-8"))
+            agent_main.TRACKER = DATA / "tracker.csv"
+            agent_main.REPORTS = DATA / "reports"
+            agent_main.PACKS = DATA / "applications"
+            import agent.sources as srcmod
+            srcmod.KEYS_PATH = DATA / "keys.json"
             sys.argv = ["main.py"]
             agent_main.main()
-        except Exception as e:  # noqa
-            STATE["log"].append(f"ERROR: {e}")
+        except BaseException as e:  # noqa - a broken settings file or anything else must not leave the app stuck "running"
+            STATE["log"].append(f"ERROR: {type(e).__name__}: {e}")
+            print(f"ERROR: {type(e).__name__}: {e}", file=buf)
         finally:
             sys.stderr, sys.stdout = old_err, old_out
-        text = buf.getvalue()
-        summ = next((l for l in text.splitlines() if l.startswith("===")), "run finished")
-        STATE.update(running=False, finished=datetime.now().isoformat(timespec="seconds"), summary=summ.strip("= "))
-        with (DATA / "runs.log").open("a", encoding="utf-8") as f:
-            f.write(f"{STATE['started']}\t{STATE['summary']}\n")
+            text = buf.getvalue()
+            summ = next((l for l in text.splitlines() if l.startswith("===")), None)
+            err = next((l for l in text.splitlines() if l.startswith("ERROR")), None)
+            STATE.update(running=False, finished=datetime.now().isoformat(timespec="seconds"),
+                         summary=(summ or err or "run finished").strip("= "))
+            try:
+                with (DATA / "runs.log").open("a", encoding="utf-8") as f:
+                    f.write(f"{STATE['started']}\t{STATE['summary']}\n")
+            except OSError:
+                pass
+            (DATA / RUN_LOCK).unlink(missing_ok=True)
     t = threading.Thread(target=work, daemon=True)
     t.start()
     if block:
         t.join()
+    return True
 
 
 # ----------------------------------------------------------------------------- Windows schedule
@@ -176,25 +198,66 @@ def schedule_status() -> bool:
 
 # ----------------------------------------------------------------------------- e-mail applications
 MAIL_FILE = "mail.json"
+EMAIL_OK = re.compile(r"[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,24}")
 PRESETS = {"gmail": ("smtp.gmail.com", 587), "outlook": ("smtp-mail.outlook.com", 587), "office365": ("smtp.office365.com", 587), "yahoo": ("smtp.mail.yahoo.com", 587)}
+
+
+def _dpapi(data: bytes, protect: bool) -> bytes:
+    """Windows DPAPI: encrypt/decrypt with the signed-in Windows user's key, so the mail password in mail.json
+    is useless if the file is copied to another account or PC."""
+    import ctypes
+    from ctypes import wintypes
+
+    class BLOB(ctypes.Structure):
+        _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_char))]
+    buf = ctypes.create_string_buffer(data, len(data))
+    inp, out = BLOB(len(data), ctypes.cast(buf, ctypes.POINTER(ctypes.c_char))), BLOB()
+    fn = ctypes.windll.crypt32.CryptProtectData if protect else ctypes.windll.crypt32.CryptUnprotectData
+    if not fn(ctypes.byref(inp), None, None, None, None, 0x1, ctypes.byref(out)):   # 0x1 = no UI
+        raise OSError("DPAPI failed")
+    try:
+        return ctypes.string_at(out.pbData, out.cbData)
+    finally:
+        ctypes.windll.kernel32.LocalFree(out.pbData)
 
 
 def mail_settings() -> dict:
     try:
-        return json.loads((DATA / MAIL_FILE).read_text(encoding="utf-8"))
+        m = json.loads((DATA / MAIL_FILE).read_text(encoding="utf-8"))
     except Exception:
         return {}
+    if m.get("password_dpapi"):
+        try:
+            m["password"] = _dpapi(base64.b64decode(m["password_dpapi"]), protect=False).decode("utf-8")
+        except Exception:
+            m["password"] = ""
+    return m
+
+
+def save_mail(m: dict):
+    from agent import tracker
+    m = dict(m)
+    pw = m.pop("password", "")
+    m.pop("password_dpapi", None)
+    if pw:
+        if os.name == "nt":
+            m["password_dpapi"] = base64.b64encode(_dpapi(pw.encode("utf-8"), protect=True)).decode()
+        else:
+            m["password"] = pw           # non-Windows (development only)
+    tracker.atomic_write(DATA / MAIL_FILE, json.dumps(m, indent=2))
 
 
 def mail_public() -> dict:
     m = mail_settings()
-    return {k: v for k, v in m.items() if k != "password"} | {"has_password": bool(m.get("password")), "has_cv": (DATA / "CV.pdf").exists()}
+    return {k: v for k, v in m.items() if k not in ("password", "password_dpapi")} | {"has_password": bool(m.get("password")), "has_cv": (DATA / "CV.pdf").exists()}
 
 
 def smtp_connect(m: dict):
     host, port = PRESETS.get(m.get("preset", ""), (m.get("smtp_host", ""), int(m.get("smtp_port") or 587)))
     if not host:
         raise ValueError("No SMTP server set")
+    if not m.get("user") or not m.get("password"):
+        raise ValueError("E-mail address and app password are needed")
     s = smtplib.SMTP(host, port, timeout=30)
     s.ehlo(); s.starttls(context=ssl.create_default_context()); s.ehlo()
     s.login(m["user"], m["password"])
@@ -202,26 +265,39 @@ def smtp_connect(m: dict):
 
 
 def tracker_rows() -> list[dict]:
-    t = DATA / "tracker.csv"
-    return list(csv.DictReader(io.StringIO(t.read_text(encoding="utf-8-sig")))) if t.exists() else []
+    from agent import tracker
+    return list(tracker.load(DATA / "tracker.csv").values())
 
 
-def tracker_write(rows: list[dict]):
+def tracker_write(rows: list[dict], locked: bool = False):
+    from agent import tracker
     if not rows:
         return
-    fields = list(rows[0].keys())
-    with (DATA / "tracker.csv").open("w", encoding="utf-8-sig", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore"); w.writeheader(); w.writerows(rows)
+    data = {r["url"]: r for r in rows if r.get("url")}
+    if locked:
+        tracker.write(DATA / "tracker.csv", data)
+    else:
+        with tracker.LOCK:
+            tracker.write(DATA / "tracker.csv", data)
+
+
+def _pack_path(rel: str) -> Path | None:
+    if not rel:
+        return None
+    p = (DATA / rel).resolve()
+    root = (DATA / "applications").resolve()
+    return p if p.is_relative_to(root) and p.suffix == ".md" and p.exists() else None
 
 
 def draft_email(row: dict) -> dict:
     """Subject + body for one tracker row, from its application pack when there is one."""
+    from agent.util import years_experience
     profile = json.loads((DATA / "profile.json").read_text(encoding="utf-8"))
     c = profile["candidate"]
     body = ""
-    if row.get("pack_file") and (DATA / row["pack_file"]).exists():
-        md = (DATA / row["pack_file"]).read_text(encoding="utf-8")
-        import re
+    pack = _pack_path(row.get("pack_file", ""))
+    if pack:
+        md = pack.read_text(encoding="utf-8")
         m = re.search(r"## Cover letter\n+([\s\S]*?)(?=\n## |$)", md)
         if m:
             body = m.group(1).strip()
@@ -229,7 +305,7 @@ def draft_email(row: dict) -> dict:
     if not body:
         body = (f"Dear Hiring Manager,\n\nI would like to apply for the {row['title']} position"
                 f"{' with ' + row['company'] if row.get('company') and row['company'] not in ('Unknown', 'Gulf Job Paper') else ''}. "
-                f"I am a civil engineer with {c['years_experience']} years of site and contract experience on water-network, roads and "
+                f"I am a civil engineer with {years_experience(profile)} years of site and contract experience on water-network, roads and "
                 f"airport infrastructure in Bahrain, NEBOSH IGC certified, available on {c['notice_period']}' notice and ready to relocate.\n\n"
                 f"My CV is attached. I would welcome the chance to discuss the role.\n\nYours sincerely,\n{c['name']}\n{c['phone']} | {c['email']}")
     subject = f"Application for {row['title']} - {c['name']}"
@@ -237,15 +313,20 @@ def draft_email(row: dict) -> dict:
 
 
 def send_application(url: str, to: str, subject: str, body: str) -> dict:
+    rcpt = [x.strip() for x in re.split(r"[,;\s]+", to) if x.strip()]
+    if not rcpt or len(rcpt) > 3 or not all(EMAIL_OK.fullmatch(x) for x in rcpt):
+        raise ValueError("Check the To address (up to 3 plain e-mail addresses)")
     m = mail_settings()
     if not (m.get("user") and m.get("password")):
         raise ValueError("E-mail settings are not complete (address + app password)")
     cv = DATA / "CV.pdf"
     if not cv.exists():
         raise ValueError("No CV attached yet - choose your CV PDF in the e-mail settings")
+    if len(subject) > 200 or len(body) > 20000:
+        raise ValueError("Subject or message is too long")
     msg = EmailMessage()
     msg["From"] = formataddr((m.get("from_name") or m["user"], m["user"]))
-    msg["To"] = ", ".join(x.strip() for x in to.split(",") if x.strip())
+    msg["To"] = ", ".join(rcpt)
     if m.get("cc_self"):
         msg["Bcc"] = m["user"]
     msg["Subject"] = subject
@@ -256,13 +337,15 @@ def send_application(url: str, to: str, subject: str, body: str) -> dict:
     sent = DATA / "sent"; sent.mkdir(exist_ok=True)
     stamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
     safe = "".join(ch if ch.isalnum() else "-" for ch in subject)[:60].strip("-")
-    (sent / f"{stamp}_{safe}.eml").write_bytes(bytes(msg))
-    rows = tracker_rows()
-    for r in rows:
-        if r.get("url") == url:
-            r["status"] = "Applied"; r["applied_date"] = r.get("applied_date") or datetime.now().date().isoformat()
-            r["user_notes"] = (r.get("user_notes", "") + f" | e-mailed {msg['To']} {stamp[:10]}").strip(" |")
-    tracker_write(rows)
+    (sent / f"{stamp}_{safe}.eml").write_bytes(bytes(msg))     # your own copy; sent/ is never served to the page
+    from agent import tracker
+    with tracker.LOCK:
+        rows = tracker_rows()
+        for r in rows:
+            if r.get("url") == url:
+                r["status"] = "Applied"; r["applied_date"] = r.get("applied_date") or datetime.now().date().isoformat()
+                r["user_notes"] = (r.get("user_notes", "") + f" | e-mailed {msg['To']} {stamp[:10]}").strip(" |")
+        tracker_write(rows, locked=True)
     return {"ok": True, "to": msg["To"], "saved": f"sent/{stamp}_{safe}.eml"}
 
 
@@ -272,6 +355,9 @@ APPLY: dict[str, object] = {}
 
 def apply_on_site(url: str) -> dict:
     from agent import browser
+    from agent.util import years_experience
+    if urlparse(url).scheme not in ("http", "https"):
+        raise ValueError("Only http(s) job links can be opened")
     row = next((r for r in tracker_rows() if r.get("url") == url), None)
     if not row:
         raise ValueError("job not in tracker")
@@ -285,27 +371,59 @@ def apply_on_site(url: str) -> dict:
     if old and not old.stop:
         return {"ok": True, "message": "already open in the apply window"}
     cv = DATA / "CV.pdf"
-    sess = browser.ApplySession(url, profile, job, cv if cv.exists() else None, f"http://127.0.0.1:{PORT}", profile_dir=DATA / "browser")
+    sess = browser.ApplySession(url, profile, job, cv if cv.exists() else None, years_experience(profile),
+                                on_submitted=lambda: mark_status(url, "Applied"), profile_dir=DATA / "browser")
     APPLY[url] = sess
     return {"ok": True, "message": "opened in the apply window", "cv": cv.exists()}
 
 
 def mark_status(url: str, status: str) -> dict:
-    rows = tracker_rows()
-    hit = False
-    for r in rows:
-        if r.get("url") == url:
-            hit = True
-            r["status"] = status
-            if status == "Applied":
-                r["applied_date"] = r.get("applied_date") or datetime.now().date().isoformat()
-    if hit:
-        tracker_write(rows)
+    from agent import tracker
+    with tracker.LOCK:
+        rows = tracker_rows()
+        hit = False
+        for r in rows:
+            if r.get("url") == url:
+                hit = True
+                r["status"] = status
+                if status == "Applied":
+                    r["applied_date"] = r.get("applied_date") or datetime.now().date().isoformat()
+        if hit:
+            tracker_write(rows, locked=True)
     return {"ok": hit}
 
 
+EDITABLE = {"status", "applied_date", "user_notes"}
+STATUSES = {"New", "Review", "Applied", "Interview", "Offer", "Rejected", "Skipped", "Found (apply off)"}
+
+
+def apply_edits(edits: dict) -> dict:
+    """Status / note changes from the page, applied under the tracker lock so a running search can't overwrite them."""
+    from agent import tracker
+    if not isinstance(edits, dict):
+        raise ValueError("bad edits")
+    with tracker.LOCK:
+        rows = tracker_rows()
+        n = 0
+        for r in rows:
+            e = edits.get(r.get("url"))
+            if not isinstance(e, dict):
+                continue
+            for k, v in e.items():
+                if k in EDITABLE and isinstance(v, str) and len(v) <= 2000 and (k != "status" or v in STATUSES):
+                    r[k] = v
+                    n += 1
+        tracker_write(rows, locked=True)
+    return {"ok": True, "changed": n}
+
+
 # ----------------------------------------------------------------------------- HTTP
+MAX_BODY = 25 * 1024 * 1024          # the CV upload is the biggest request
+
+
 class Handler(BaseHTTPRequestHandler):
+    timeout = 60                      # a stalled client can't hold a thread forever
+
     def log_message(self, *a):  # quiet
         pass
 
@@ -314,10 +432,12 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
-        if urlparse(self.path).path == PUBLIC_PATH:      # the only call job sites may make (the apply bar's "I submitted")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.send_header("Access-Control-Allow-Headers", "Content-Type")
-            self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
+        if ctype.startswith("text/html"):
+            self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
+                             "img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
+            self.send_header("X-Frame-Options", "DENY")
         self.end_headers()
         self.wfile.write(body)
 
@@ -326,7 +446,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def _safe(self, rel: str) -> Path | None:
         """Files the page may read/write: text files in the data folder, never the mail password, CV, sent mail or browser profile."""
-        p = (DATA / rel).resolve()
+        try:
+            p = (DATA / rel).resolve()
+        except (OSError, ValueError):
+            return None
         root = DATA.resolve()
         if not p.is_relative_to(root) or p == root:
             return None
@@ -335,27 +458,63 @@ class Handler(BaseHTTPRequestHandler):
             return None
         return p
 
-    def _trusted(self) -> bool:
-        """Only this app's own page may use the API. Blocks other websites (Origin) and DNS-rebinding (Host)."""
+    def _trusted(self, api: bool) -> bool:
+        """Only this app's own page may use the API: exact Host (DNS rebinding), same Origin (other websites),
+        and for /api/* the per-launch token that is written into the page."""
         host = (self.headers.get("Host") or "").lower()
         if host not in (f"127.0.0.1:{PORT}", f"localhost:{PORT}"):
             return False
         origin = self.headers.get("Origin")
         if origin and origin.lower() not in (f"http://127.0.0.1:{PORT}", f"http://localhost:{PORT}"):
-            return urlparse(self.path).path == PUBLIC_PATH and self.command in ("POST", "OPTIONS")
+            return False
+        if api and not hmac.compare_digest(self.headers.get("X-JobAgent-Token", ""), TOKEN):
+            return False
         return True
 
+    def _body(self):
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            n = -1
+        if n < 0 or n > MAX_BODY:
+            raise ValueError("request too large")
+        raw = self.rfile.read(n) if n else b""
+        if not raw:
+            return {}
+        d = json.loads(raw)
+        if not isinstance(d, dict):
+            raise ValueError("expected a JSON object")
+        return d
+
     def do_OPTIONS(self):
-        if urlparse(self.path).path == PUBLIC_PATH and self._trusted():
-            return self._send(204, b"")
         return self._send(403, b"")
 
     def do_GET(self):
-        if not self._trusted():
+        u = urlparse(self.path)
+        if not self._trusted(api=u.path.startswith("/api/")):
             return self._json({"error": "forbidden"}, 403)
-        u = urlparse(self.path); q = parse_qs(u.query)
+        try:
+            self._get(u, parse_qs(u.query))
+        except Exception as e:  # noqa - one bad request must not take the app down
+            self._json({"error": f"{type(e).__name__}: {e}"}, 500)
+
+    def do_POST(self):
+        u = urlparse(self.path)
+        if not self._trusted(api=True):
+            return self._json({"error": "forbidden"}, 403)
+        try:
+            d = self._body()
+        except Exception as e:
+            return self._json({"error": str(e)}, 400)
+        try:
+            self._post(u, parse_qs(u.query), d)
+        except Exception as e:  # noqa
+            self._json({"ok": False, "error": f"{type(e).__name__}: {e}"}, 500)
+
+    def _get(self, u, q):
         if u.path in ("/", "/index.html"):
-            return self._send(200, (BUNDLE / "panel_local.html").read_bytes(), "text/html; charset=utf-8")
+            html = (BUNDLE / "panel_local.html").read_text(encoding="utf-8").replace("__JOBAGENT_TOKEN__", TOKEN)
+            return self._send(200, html.encode("utf-8"), "text/html; charset=utf-8")
         if u.path == "/api/file":
             p = self._safe(q.get("path", [""])[0])
             if not p or not p.exists():
@@ -370,7 +529,7 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/mail":
             return self._json(mail_public())
         if u.path == "/api/apply-status":
-            return self._json({u_: {"stopped": s_.stop, "log": s_.log[-5:]} for u_, s_ in APPLY.items()})
+            return self._json({u_: {"stopped": s_.stop, "done": s_.done, "log": s_.log[-5:]} for u_, s_ in APPLY.items()})
         if u.path == "/api/draft":
             url = q.get("url", [""])[0]
             row = next((r for r in tracker_rows() if r.get("url") == url), None)
@@ -379,32 +538,45 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(draft_email(row))
         return self._json({"error": "no route"}, 404)
 
-    def do_POST(self):
-        if not self._trusted():
-            return self._json({"error": "forbidden"}, 403)
-        u = urlparse(self.path); q = parse_qs(u.query)
-        n = int(self.headers.get("Content-Length", 0)); body = self.rfile.read(n) if n else b""
+    def _post(self, u, q, d):
+        from agent import tracker
         if u.path == "/api/file":
             p = self._safe(q.get("path", [""])[0])
             if not p:
                 return self._json({"error": "bad path"}, 400)
+            if p.name == "tracker.csv":
+                return self._json({"error": "use /api/edits for the job list"}, 400)
             p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(json.loads(body).get("text", ""), encoding="utf-8")
+            text = d.get("text", "")
+            if p.suffix == ".json":
+                try:
+                    json.loads(text)                 # never save a broken settings file
+                except ValueError as e:
+                    return self._json({"ok": False, "error": f"not saved - the settings text is not valid JSON ({e})"}, 400)
+            tracker.atomic_write(p, text)
             return self._json({"ok": True})
+        if u.path == "/api/edits":
+            return self._json(apply_edits(d.get("edits", {})))
         if u.path == "/api/run":
-            run_agent(); return self._json({"ok": True})
+            started = run_agent()
+            return self._json({"ok": started, "error": "" if started else "A search is already running."})
         if u.path == "/api/schedule":
-            d = json.loads(body or b"{}")
-            return self._json({"ok": True, "message": schedule(bool(d.get("enable")), int(d.get("hour", 7))), "scheduled": schedule_status()})
+            hour = int(d.get("hour", 7))
+            if not 0 <= hour <= 23:
+                return self._json({"error": "hour must be 0-23"}, 400)
+            return self._json({"ok": True, "message": schedule(bool(d.get("enable")), hour), "scheduled": schedule_status()})
         if u.path == "/api/mail":
-            d = json.loads(body or b"{}")
             m = mail_settings()
-            for k in ("preset", "smtp_host", "smtp_port", "user", "from_name", "cc_self"):
+            for k in ("preset", "smtp_host", "user", "from_name"):
                 if k in d:
-                    m[k] = d[k]
+                    m[k] = str(d[k])[:200].strip()
+            if "smtp_port" in d:
+                m["smtp_port"] = int(d["smtp_port"] or 587)
+            if "cc_self" in d:
+                m["cc_self"] = bool(d["cc_self"])
             if d.get("password"):
-                m["password"] = d["password"]
-            (DATA / MAIL_FILE).write_text(json.dumps(m, indent=2), encoding="utf-8")
+                m["password"] = str(d["password"])
+            save_mail(m)
             return self._json({"ok": True} | mail_public())
         if u.path == "/api/mail-test":
             try:
@@ -414,31 +586,26 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 return self._json({"ok": False, "message": f"{type(e).__name__}: {e}"})
         if u.path == "/api/cv":
-            d = json.loads(body or b"{}")
-            raw = base64.b64decode(d.get("data", ""))
-            if not raw.startswith(b"%PDF"):
-                return self._json({"ok": False, "error": "Please choose a PDF file"})
-            (DATA / "CV.pdf").write_bytes(raw)
-            m = mail_settings(); m["cv_name"] = d.get("name") or "CV.pdf"
-            (DATA / MAIL_FILE).write_text(json.dumps(m, indent=2), encoding="utf-8")
+            raw = base64.b64decode(d.get("data", ""), validate=True)
+            if not raw.startswith(b"%PDF") or len(raw) > 15 * 1024 * 1024:
+                return self._json({"ok": False, "error": "Please choose a PDF file under 15 MB"})
+            tracker.atomic_write(DATA / "CV.pdf", raw)
+            m = mail_settings()
+            m["cv_name"] = "".join(ch for ch in str(d.get("name") or "CV.pdf") if ch.isalnum() or ch in " ._-()")[:80] or "CV.pdf"
+            if not m["cv_name"].lower().endswith(".pdf"):
+                m["cv_name"] += ".pdf"
+            save_mail(m)
             return self._json({"ok": True, "name": m["cv_name"]})
         if u.path == "/api/send":
-            d = json.loads(body or b"{}")
             try:
-                return self._json(send_application(d["url"], d["to"], d["subject"], d["body"]))
+                return self._json(send_application(str(d["url"]), str(d["to"]), str(d["subject"]), str(d["body"])))
             except Exception as e:
                 return self._json({"ok": False, "error": f"{type(e).__name__}: {e}"})
         if u.path == "/api/apply-site":
-            d = json.loads(body or b"{}")
             try:
-                return self._json(apply_on_site(d["url"]))
+                return self._json(apply_on_site(str(d["url"])))
             except Exception as e:
                 return self._json({"ok": False, "error": f"{type(e).__name__}: {e}"})
-        if u.path == PUBLIC_PATH:
-            d = json.loads(body or b"{}")
-            if d.get("url") not in APPLY:            # only jobs you opened with "Apply on site", only to Applied
-                return self._json({"ok": False, "error": "unknown job"}, 403)
-            return self._json(mark_status(d["url"], "Applied"))
         if u.path == "/api/open-folder":
             try:
                 if os.name == "nt": os.startfile(DATA)  # type: ignore[attr-defined]
@@ -449,10 +616,21 @@ class Handler(BaseHTTPRequestHandler):
         return self._json({"error": "no route"}, 404)
 
 
+def _shutdown():
+    try:
+        from agent import browser
+        browser.close_browser()
+    except Exception:
+        pass
+
+
 def serve(open_browser=True):
     ensure_data()
     sys.path.insert(0, str(BUNDLE))
+    import atexit
+    atexit.register(_shutdown)
     srv = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+    srv.daemon_threads = True
     url = f"http://127.0.0.1:{PORT}/"
     if open_browser:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()

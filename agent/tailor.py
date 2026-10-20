@@ -15,7 +15,7 @@ from .util import years_experience
 ROLE = {
     "civil":          ("a civil engineer with {y} years of site and contract experience on water-network, roads and airport infrastructure",
                        "water_networks", "Civil Engineer"),
-    "oil_gas":        ("a civil engineer with {y} years of site, QA/QC and HSE experience on live utility and industrial projects, including work for Bapco and the Al Dur IWPP",
+    "oil_gas":        ("a civil engineer with {y} years of site, QA/QC and HSE experience on live utility, airport and industrial sites",
                        "qaqc", "Civil Engineer"),
     "hse":            ("a NEBOSH IGC-certified civil engineer with {y} years on live construction and utility sites, where I run risk assessments and permit-to-work control",
                        "hse", "NEBOSH-certified Civil / Site Engineer"),
@@ -70,13 +70,14 @@ def cover_letter(j: dict, profile: dict) -> str:
     intro, lead, _ = _role(j)
     blocks = _relevant_blocks(j["title"] + " " + j["description"], profile, 3, lead)
     body = " ".join(b["text"] for _, b, _ in blocks)
-    company = j["company"] if j["company"] != "Unknown" else "your company"
-    loc = j["location"] if j["location"] != "Not specified" else (j.get("country") or "the GCC")
+    company = _company(j)
+    loc = _place(j)
+    nebosh = "" if j.get("category") in ("hse",) or any(k == "hse" for k, _, _ in blocks) else ", and I hold the NEBOSH International General Certificate"
     return (
         f"{date.today():%d %B %Y}\n\n"
         f"Dear Hiring Manager,\n\n"
-        f"I am applying for the {j['title']} position with {company} in {loc}. I am {intro.format(y=years_experience(profile))}"
-        f"{'' if j.get('category') == 'hse' else ', and I hold the NEBOSH International General Certificate'}.\n\n"
+        f"I am applying for the {j['title']} position with {company}{(' in ' + loc) if loc else ''}. "
+        f"I am {intro.format(y=years_experience(profile))}{nebosh}.\n\n"
         f"{body}\n\n"
         f"{_authorisation_line(j, c)} My notice period is {c['notice_period']}. I would welcome the chance to "
         f"discuss how my experience fits your project.\n\n"
@@ -87,9 +88,36 @@ def cover_letter(j: dict, profile: dict) -> str:
 GCC = {"Saudi Arabia", "United Arab Emirates", "Qatar", "Kuwait", "Oman", "Bahrain"}
 
 
+THE = {"United Arab Emirates", "GCC", "United States", "United Kingdom"}
+SOURCES = {"unknown", "", "gulf job paper", "linkedin", "seek", "rigzone", "jooble", "kuwait jobs here"}
+
+
+def _country_name(c: str) -> str:
+    return f"the {c}" if c in THE else c
+
+
+def _company(j: dict) -> str:
+    c = (j.get("company") or "").strip()
+    return "your company" if c.lower() in SOURCES or len(c) < 2 else c
+
+
+def _place(j: dict) -> str:
+    """'Riyadh, Saudi Arabia' from whatever the source gave ('AE - Dubai', 'Riyadh, Riyadh, Saudi Arabia', 'Not specified')."""
+    loc = re.sub(r"^[A-Z]{2,3}\s*-+\s*", "", (j.get("location") or "").strip())
+    parts = []
+    for p in (x.strip() for x in loc.split(",")):
+        if p and p.lower() not in ("not specified", "remote", "other") and p.lower() not in (x.lower() for x in parts):
+            parts.append(p)
+    country = j.get("country") or ""
+    if country and country != "Other" and not any(country.lower() in p.lower() for p in parts):
+        parts.append(country)
+    text = ", ".join(parts[-2:]) if len(parts) > 2 else ", ".join(parts)
+    return re.sub(r"\bUnited Arab Emirates\b", "the United Arab Emirates", text) if text == "United Arab Emirates" else text
+
+
 def _authorisation_line(j: dict, c: dict) -> str:
-    country = j.get("country") or "the GCC"
-    return f"I am ready to relocate to {country}."
+    country = j.get("country") or ""
+    return f"I am ready to relocate to {_country_name(country)}." if country and country != "Other" else "I am ready to relocate."
 
 
 QUESTION_RE = re.compile(r"([A-Z][^.?!]{15,160}\?)")

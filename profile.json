@@ -116,7 +116,11 @@
       "civil inspector oil gas",
       "HSE officer oil gas"
     ],
-    "min_score_oilgas": 55
+    "min_score_oilgas": 55,
+    "max_posting_age_days": 45,
+    "no_listing_bonus_sources": [
+      "SEEK"
+    ]
   },
   "target_titles": [
     "civil engineer",
@@ -151,7 +155,9 @@
     "assistant engineer",
     "entry level civil engineer",
     "civil engineering graduate",
-    "engineer in training"
+    "engineer in training",
+    "utilities network engineer",
+    "wet utilities network engineer"
   ],
   "title_penalties": {
     "senior": -15,
@@ -214,7 +220,7 @@
     "data infrastructure": -80,
     "database": -70,
     "process engineer": -35,
-    "_comment": "Whole-word matches in the job title. Skipped when the word is part of the target title that matched (e.g. 'surveyor' in 'quantity surveyor')."
+    "_comment": "Whole-word matches in the job title. Skipped when the word is part of the matched target title, or when title_penalty_exempt says so."
   },
   "keyword_points": {
     "water network": 12,
@@ -298,17 +304,17 @@
     "local council": 3
   },
   "hard_reject_patterns": [
-    "\\b(?:1[0-9]|[2-9][0-9])\\s*\\+?\\s*(?:years|yrs)(?=[^.;\\n]{0,60}\\bexperience)",
-    "\\bexperience[^.;\\n]{0,30}?\\b(?:1[0-9]|[2-9][0-9])\\s*\\+?\\s*(?:years|yrs)",
-    "\\b[7-9]\\s*(?:-|to|–)\\s*(?:1[0-9]|[2-9][0-9])\\s*(?:years|yrs)",
-    "\\bminimum\\s+(?:of\\s+)?(?:[7-9]|1[0-9])\\s*\\+?\\s*(?:years|yrs)",
-    "\\b[7-9]\\s*\\+\\s*(?:years|yrs)(?=[^.;\\n]{0,60}\\bexperience)",
-    "\\bph\\.?d\\b",
+    "(?<![\\d\\s][-–])(?<![-–])(?<!\\bto\\s)\\b(?:[7-9]|1[0-5])\\s*(?:-|–|to)\\s*\\d{1,2}\\s*\\+?\\s*(?:years|yrs)",
+    "\\b(?:minimum|min\\.?|at least)\\s+(?:of\\s+)?(?:[7-9]|1[0-5])\\s*\\+?\\s*(?:years|yrs)",
+    "(?<![-–\\d])(?<!\\bto\\s)\\b(?:[7-9]|1[0-5])\\s*\\+\\s*(?:years|yrs)(?=[^.;\\n]{0,60}\\bexperience)",
+    "\\bph\\.?\\s?d\\.?\\b[^.;\\n]{0,30}\\b(?:is\\s+)?(?:required|mandatory|essential|must)\\b|\\b(?:required|must (?:have|hold))\\b[^.;\\n]{0,30}\\bph\\.?\\s?d\\b",
     "\\bmaster'?s?\\s+degree\\s+(?:is\\s+)?(?:required|mandatory)",
     "\\b(?:saudi|uae|emirati|qatari|kuwaiti|omani)\\s+(?:nationals?|citizens?)\\s+only\\b",
-    "\\bonly\\s+(?:saudi|uae|emirati|qatari|kuwaiti|omani)\\s+(?:nationals?|citizens?)\\b",
+    "\\bonly\\s+(?:saudi|uae|emirati|qatari|kuwaiti|omani)\\s+(?:nationals?|citizens?)\\b(?![^.;\\n]{0,20}\\b(?:or|and|/)\\s*gcc)",
     "\\bfor\\s+(?:saudis|emiratis|qataris|kuwaitis|omanis)\\s+only\\b",
-    "\\b(?:bachelor|degree)\\s+in\\s+(?:electrical|mechanical|chemical|computer|petroleum)\\s+engineering\\b(?![^.;\\n]{0,40}\\bcivil\\b)"
+    "\\b(?:bachelor|degree)\\s+in\\s+(?:electrical|mechanical|chemical|computer|petroleum)\\s+engineering\\b(?![^.;\\n]{0,40}\\bcivil\\b)",
+    "\\b(?:this|the)\\s+(?:vacancy|position|job|role|posting)\\s+(?:is|has)\\s+(?:now\\s+)?(?:been\\s+)?(?:closed|filled|expired)\\b",
+    "\\bno longer accepting applications\\b|\\bapplications? (?:are|is|have) (?:now )?closed\\b"
   ],
   "experience_fit": {
     "_comment": "Experience ranges that match 4 years earn a bonus; others are penalised in score.py",
@@ -454,18 +460,18 @@
   },
   "screening_answers": {
     "_comment": "Pattern (regex, case-insensitive) -> factual answer. Used to pre-draft answers to common application questions.",
+    "\\bdriv(ing|er'?s?)\\s*licen[cs]e": "Valid Bahrain driving licence.",
     "degree|bachelor|qualification": "Yes - B.Sc. Civil Engineering, University of Bahrain (2017-2021), GPA 3.17/4.0.",
     "years? of experience|how many years|experience level": "4 years of civil engineering experience (Nov 2021 - present): water-network maintenance, roads and infrastructure, and airfield works in Bahrain.",
     "notice|availability|start date|join": "30 days' notice; can join within 30 days of offer.",
     "relocat|willing to work|based in|onsite|on-site|shift": "Yes - willing to relocate and to work on site and on shifts.",
-    "saudi council|sce|license|licence|registration": "Eligible for Saudi Council of Engineers registration; registration can be completed on appointment.",
+    "\\bsaudi council\\b|\\bsce\\b|\\bengineering (licen[cs]e|registration)\\b|\\bprofessional (licen[cs]e|registration)\\b": "Eligible for Saudi Council of Engineers registration; registration can be completed on appointment.",
     "salary|expected|compensation": "Open to discussion in line with the role and market; happy to share expectations at interview.",
     "nebosh|iosh|safety cert|hse": "Yes - NEBOSH IGC, IOSH Working Safely, Highfield Fire Safety L2 and Risk Assessment L2, MEDIC First Aid.",
     "autocad|civil 3d|software": "AutoCAD and Civil 3D (project and course experience), STAAD Pro (training), MS Project, Excel, Power Apps.",
-    "water|wastewater|pipeline|nwc": "Yes - 2 years on the EWA Bahrain Water Distribution Directorate emergency repair contract: leak repairs, pipe replacement, reinstatement, monthly BOQ claims. Not yet used NWC's WFM system; used EWA's equivalent work-order and BOQ system.",
+    "\\bwater\\b|\\bwastewater\\b|\\bpipelines?\\b|\\bnwc\\b|\\bnational water company\\b": "2 years on the Electricity & Water Authority (Bahrain) water distribution emergency repair contract: leak repairs, pipe replacement, reinstatement and the monthly BOQ claims. I have not worked on NWC projects; I used EWA's equivalent work-order and BOQ system.",
     "road|highway|asphalt|infrastructure": "Yes - road, bridge, storm-water and asphalt works for Bapco, Wadi Al Buhair and Al Dur IWPP (Sayed Kadhem Aldurazi & Sons), including road-closure and traffic-management plans.",
     "qa/?qc|quality|inspection": "Yes - QA/QC procedures, inspection requests and monthly quantity reports on airfield works at Bahrain International Airport; quality verification of excavation, pipe repairs, backfill and asphalt reinstatement on the EWA contract.",
-    "driving|licen[cs]e": "Valid Bahrain driving licence.",
     "arabic|language": "Arabic native, English fluent."
   },
   "categories": {
@@ -575,7 +581,43 @@
         "water": 3,
         "fleet": 3,
         "maintenance": 2
-      }
+      },
+      "require_any": [
+        "construction",
+        "contracting",
+        "contractor",
+        "civil",
+        "infrastructure",
+        "utility",
+        "utilities",
+        "water",
+        "power",
+        "energy",
+        "oil",
+        "gas",
+        "petrochemical",
+        "refinery",
+        "plant",
+        "industrial",
+        "manufacturing",
+        "engineering",
+        "epc",
+        "project",
+        "projects",
+        "site",
+        "sites",
+        "maintenance",
+        "facilities",
+        "facility management",
+        "mining",
+        "marine",
+        "port",
+        "airport",
+        "rail",
+        "roads",
+        "fleet",
+        "heavy equipment"
+      ]
     },
     "data_reporting": {
       "label": "Operations / Data reporting",
@@ -606,7 +648,43 @@
         "water": 4,
         "construction": 2,
         "sql": 2
-      }
+      },
+      "require_any": [
+        "construction",
+        "contracting",
+        "contractor",
+        "civil",
+        "infrastructure",
+        "utility",
+        "utilities",
+        "water",
+        "power",
+        "energy",
+        "oil",
+        "gas",
+        "petrochemical",
+        "refinery",
+        "plant",
+        "industrial",
+        "manufacturing",
+        "engineering",
+        "epc",
+        "project",
+        "projects",
+        "site",
+        "sites",
+        "maintenance",
+        "facilities",
+        "facility management",
+        "mining",
+        "marine",
+        "port",
+        "airport",
+        "rail",
+        "roads",
+        "fleet",
+        "heavy equipment"
+      ]
     },
     "oil_gas": {
       "label": "Oil & Gas",
@@ -652,11 +730,6 @@
         "shutdown": 4,
         "brownfield": 4,
         "onshore": 3,
-        "construction": 4,
-        "civil": 6,
-        "concrete": 3,
-        "foundation": 3,
-        "earthworks": 3,
         "nebosh": 8,
         "iosh": 4,
         "permit to work": 5,
@@ -676,10 +749,9 @@
         "graduate": 4,
         "trainee": 4,
         "training program": 4,
-        "entry level": 4,
-        "excel": 1,
-        "reports": 2
-      }
+        "entry level": 4
+      },
+      "requires_sector": "oil_gas"
     }
   },
   "_fresher_note": "Fresher/graduate/junior roles are accepted for civil and oil & gas; only unpaid internships keep a small penalty.",
@@ -707,14 +779,10 @@
         "\\bbapco\\b",
         "\\bsabic\\b",
         "\\bgas plant\\b",
-        "\\bprocess plant\\b",
         "\\bonshore\\b",
         "\\boffshore\\b",
-        "\\bpipeline\\b",
-        "\\bepc\\b",
         "\\bshutdown\\b",
         "\\bturnaround\\b",
-        "\\bbrownfield\\b",
         "\\bwell\\s*site\\b",
         "\\bdrilling\\b",
         "\\brig\\b",
@@ -732,18 +800,11 @@
         "\\bworley\\b",
         "\\bwood\\s*plc\\b",
         "\\bnes fircroft\\b",
-        "\\bkbr\\b",
-        "\\bfluor\\b",
-        "\\bbechtel\\b",
         "\\bl&t hydrocarbon\\b",
-        "\\bsamsung engineering\\b",
-        "\\bhyundai engineering\\b",
         "\\bsinopec\\b",
         "\\bcpecc\\b",
-        "\\bnesma\\b",
-        "\\balmana\\b",
-        "\\bgalfar\\b",
-        "\\bsaudi arabian oil\\b"
+        "\\bsaudi arabian oil\\b",
+        "\\b(?:oil|gas|crude|hydrocarbon)\\s+pipelines?\\b"
       ]
     }
   },
@@ -770,10 +831,48 @@
     "sce_registered": "No"
   },
   "title_reject_patterns": [
-    "\\b(?:uae|emirati|saudi|qatari|kuwaiti|omani)\\s+(?:nationals?|citizens?)\\b",
-    "\\((?:uae|saudi|qatari|kuwaiti|omani)\\s+(?:only|nationals?)\\)",
-    "\\bsaudi\\s+only\\b",
-    "\\bnationals?\\s+only\\b",
+    "^(?!.*\\b(?:gcc|bahraini?)\\b).*\\b(?:uae|emirati|saudi|qatari|kuwaiti|omani)\\s+(?:nationals?|citizens?)\\b",
+    "^(?!.*\\b(?:gcc|bahraini?)\\b).*\\((?:uae|saudi|qatari|kuwaiti|omani)\\s+(?:only|nationals?)\\)",
+    "^(?!.*\\b(?:gcc|bahraini?)\\b).*\\bsaudi\\s+only\\b",
+    "^(?!.*\\b(?:gcc|bahraini?)\\b).*\\bnationals?\\s+only\\b",
     "\\bemiratisation\\b|\\bsaudi[sz]ation\\b"
-  ]
+  ],
+  "title_penalty_exempt": {
+    "_comment": "A penalty word is ignored when the title also matches this (e.g. 'Wet Utilities Network Engineer' is not IT).",
+    "network engineer": "water|wet|utilit|pipe|sewer|drain|irrigation|distribution|gas|district cooling",
+    "network": "water|wet|utilit|pipe|sewer|drain|irrigation|distribution",
+    "process engineer": "water|wastewater|treatment",
+    "mud": "mudharabah",
+    "saudi national": "\\bgcc\\b|\\bbahraini?\\b",
+    "saudis only": "\\bgcc\\b|\\bbahraini?\\b",
+    "emirati": "\\bgcc\\b|\\bbahraini?\\b",
+    "qatari national": "\\bgcc\\b|\\bbahraini?\\b"
+  },
+  "work_rights": {
+    "_comment": "Outside the GCC: 'reject' = you can't legally take the job without citizenship/PR/clearance; 'penalty' = boilerplate that usually means no sponsorship.",
+    "Australia": {
+      "reject": [
+        "\\baustralian citizens?(hip)?\\b(?![^.;\\n]{0,30}\\bor\\b[^.;\\n]{0,30}\\bvisa)",
+        "\\bpermanent residen(t|cy|ts)\\b",
+        "\\b(?:full|unrestricted)\\s+(?:australian\\s+)?work(?:ing)?\\s+rights\\b",
+        "\\bnv[12]\\b|\\bbaseline\\s+(?:security\\s+)?clearance\\b|\\bsecurity clearance\\b|\\bagsva\\b",
+        "\\bpr\\s+holders?\\b"
+      ],
+      "penalty": [
+        "\\bright to work in australia\\b|\\bwork(?:ing)? rights\\b|\\bno (?:visa )?sponsorship\\b|\\bunable to sponsor\\b|\\bnot (?:able|offering) to sponsor\\b"
+      ]
+    },
+    "Canada": {
+      "reject": [
+        "\\bcanadian citizens?\\b[^.;\\n]{0,40}\\bpermanent residents?\\b(?![^.;\\n]{0,40}\\bwork permit)",
+        "\\bsecurity clearance\\b|\\breliability status\\b|\\bsecret clearance\\b",
+        "\\bmust be (?:a )?canadian citizen\\b"
+      ],
+      "penalty": [
+        "\\b(?:legally )?(?:eligible|entitled|authori[sz]ed) to work in canada\\b|\\bno (?:visa )?sponsorship\\b|\\bunable to sponsor\\b|\\bnot (?:able|offering) to sponsor\\b"
+      ]
+    }
+  },
+  "_rules_version": 4,
+  "_rules_comment": "Rule lists (rejects, penalties, sectors, work rights, screening answers, category rules) are maintained by the program and refreshed when it updates. Your facts, countries, queries and minimum scores are yours."
 }
