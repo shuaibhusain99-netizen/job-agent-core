@@ -39,6 +39,15 @@ def ensure_data():
     upgrade_config()
     if not (DATA / "tracker.csv").exists():
         tracker.write(DATA / "tracker.csv", {})
+    else:
+        try:                                         # one-time re-tag of rows from older versions (display tags only)
+            with tracker.locked(DATA / "tracker.csv"):
+                rows = tracker.load(DATA / "tracker.csv")
+                profile = json.loads((DATA / "profile.json").read_text(encoding="utf-8"))
+                if tracker.retag_old_rows(rows, profile):
+                    tracker.write(DATA / "tracker.csv", rows)
+        except Exception as e:  # noqa
+            print(f"job list re-tag skipped: {e}")
 
 
 # Rule sets the program owns: replaced when a newer program version ships new rules (_rules_version goes up).

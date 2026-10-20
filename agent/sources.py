@@ -138,9 +138,10 @@ def fetch_linkedin(cfg: dict, profile: dict) -> list[dict]:
     tpr = f"r{int(cfg.get('days', 7)) * 86400}"
     for country in countries(profile):
         country_hits, challenged = 0, 0
+        civil_q = {x.lower() for x in profile["search"]["queries"]}
         for q in all_queries(profile):
             start = 0
-            for page in range(pages):
+            for page in range(pages if q.lower() in civil_q else 1):
                 url = ("https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?"
                        f"keywords={quote_plus(q)}&location={quote_plus(country)}&f_TPR={tpr}&start={start}")
                 status, body = http(url)
@@ -584,21 +585,49 @@ def enrich(j: dict) -> None:
 
 
 def fetch_all(sources: dict, profile: dict) -> list[dict]:
+    """Each source is a different website, so they run side by side; inside a source requests stay one at a time
+    with polite pauses."""
+    from concurrent.futures import ThreadPoolExecutor
     fetchers = [
-        ("jooble", fetch_jooble), ("google_alerts_rss", fetch_rss), ("gulftalent", fetch_gulftalent),
-        ("linkedin_guest", fetch_linkedin), ("seek", fetch_seek), ("workday", fetch_workday), ("successfactors", fetch_successfactors),
-        ("workable", fetch_workable), ("greenhouse", fetch_greenhouse), ("lever", fetch_lever),
-        ("smartrecruiters", fetch_smartrecruiters), ("rigzone", fetch_rigzone), ("newspapers", fetch_wordpress),
+        ("linkedin_guest", fetch_linkedin), ("seek", fetch_seek), ("workday", fetch_workday), ("rigzone", fetch_rigzone),
+        ("newspapers", fetch_wordpress), ("successfactors", fetch_successfactors), ("workable", fetch_workable),
+        ("jooble", fetch_jooble), ("gulftalent", fetch_gulftalent), ("google_alerts_rss", fetch_rss),
+        ("greenhouse", fetch_greenhouse), ("lever", fetch_lever), ("smartrecruiters", fetch_smartrecruiters),
     ]
-    jobs = []
-    for key, fn in fetchers:
-        cfg = sources.get(key) or {}
+
+    def run(item):
+        key, fn = item
         t0 = time.time()
         try:
-            got = fn(cfg, profile)
-            jobs.extend(j for j in got if j.get("url") and j.get("title"))
+            got = [j for j in fn(sources.get(key) or {}, profile) if j.get("url") and j.get("title")]
         except Exception as e:
             log(f"{key}: failed ({type(e).__name__}: {e})")
+            got = []
         if time.time() - t0 > 5:
-            log(f"  ({key} took {int(time.time() - t0)}s)")
+            log(f"  ({key}: {len(got)} jobs in {int(time.time() - t0)}s)")
+        return got
+    jobs = []
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        for got in ex.map(run, fetchers):
+            jobs.extend(got)
     return jobs
+
+
+def enrich_many(jobs: list[dict], budget: int) -> int:
+    """Fetch full ads for up to `budget` jobs (best first). One worker per website, so each site still sees one
+    request at a time. Returns how many were fetched."""
+    from concurrent.futures import ThreadPoolExecutor
+    picked = [j for j in jobs if j.get("source") in ENRICHERS and len(j.get("description", "")) < 300][:budget]
+    by_site: dict[str, list] = {}
+    for j in picked:
+        by_site.setdefault(j["source"], []).append(j)
+
+    def work(lst):
+        n = 0
+        for j in lst:
+            before = len(j.get("description", ""))
+            enrich(j)
+            n += len(j.get("description", "")) != before
+        return n
+    with ThreadPoolExecutor(max_workers=max(1, len(by_site))) as ex:
+        return sum(ex.map(work, by_site.values()))

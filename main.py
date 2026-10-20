@@ -10,7 +10,7 @@ import argparse, hashlib, json, sys
 from datetime import date
 from pathlib import Path
 
-from agent.sources import fetch_all, enrich
+from agent.sources import fetch_all, enrich_many
 from agent.score import score
 from agent.tailor import application_pack
 from agent import tracker
@@ -27,7 +27,7 @@ PACKS = ROOT / "applications"
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry", action="store_true", help="don't write tracker/sheet")
-    ap.add_argument("--max-enrich", type=int, default=350, help="how many new candidates get full descriptions fetched")
+    ap.add_argument("--max-enrich", type=int, default=300, help="how many jobs get their full ad fetched (best first)")
     args = ap.parse_args()
     REPORTS.mkdir(exist_ok=True)
     PACKS.mkdir(exist_ok=True)
@@ -53,6 +53,9 @@ def main() -> int:
     # 2. the job list as it stands (by the same keys, so a LinkedIn job seen on another subdomain is still "known")
     known = tracker.load(TRACKER)
     tracker.backfill_from_notes(known)
+    n = tracker.retag_old_rows(known, PROFILE)
+    if n:
+        log(f"Re-tagged {n} rows saved by an older version")
     known_key = {dedupe_key(r): u for u, r in known.items()}
     for r in tracker.sweep_titles(known, PROFILE):
         drop_pack(r)
@@ -68,24 +71,22 @@ def main() -> int:
         j["reasons"] = "; ".join(r)
         j["_known"] = known_key.get(dedupe_key(j))
     jobs.sort(key=lambda j: -j["match_score"])
-    budget = args.max_enrich
+    want = []
     for j in jobs:
-        if budget <= 0:
-            break
         if j["verdict"] == "reject":
             continue
         if j["_known"]:
             row = known[j["_known"]]
             if not tracker._untouched(row) or tracker._known_len(row) >= 400:
                 continue
-        before = len(j.get("description", ""))
-        enrich(j)
-        if len(j.get("description", "")) != before:
-            budget -= 1
+        want.append(j)
+    fetched = enrich_many(want, args.max_enrich)
+    for j in want:
+        if len(j.get("description", "")) >= 300:
             j["match_score"], j["verdict"], r = score(j, PROFILE)
             j["reasons"] = "; ".join(r)
     jobs.sort(key=lambda j: -j["match_score"])
-    log(f"Fetched full descriptions for {args.max_enrich - budget} jobs")
+    log(f"Fetched full descriptions for {fetched} jobs")
 
     # 4. update known jobs, add new ones, write application packs for new matches
     apply_countries = countries(PROFILE, "apply")

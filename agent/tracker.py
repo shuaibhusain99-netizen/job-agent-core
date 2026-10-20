@@ -173,7 +173,7 @@ def row_from_job(j: dict) -> dict:
     }
 
 
-FILL = ("sector", "salary", "apply_email", "posted")
+FILL = ("salary", "apply_email", "posted")
 
 
 def _untouched(row: dict) -> bool:
@@ -208,9 +208,10 @@ def refresh(row: dict, j: dict, apply_countries: list[str] | None = None) -> str
     status = "New" if j["verdict"] == "apply" else "Review"
     if status == "New" and apply_countries is not None and j.get("country") not in apply_countries:
         status = "Found (apply off)"
-    if (str(row.get("score")), row.get("status"), row.get("category")) != (str(j["match_score"]), status, j.get("category")):
+    if (str(row.get("score")), row.get("status"), row.get("category"), row.get("sector")) != \
+            (str(j["match_score"]), status, j.get("category"), j.get("sector", "")):
         row.update(score=j["match_score"], verdict=j["verdict"], status=status, notes=j["reasons"][:200],
-                   category=j.get("category", row.get("category")), desc_len=new_len)
+                   category=j.get("category", row.get("category")), sector=j.get("sector", ""), desc_len=new_len)
         changed = "updated"
     return changed
 
@@ -236,12 +237,25 @@ def backfill_from_notes(rows: dict[str, dict]) -> int:
     n = 0
     for r in rows.values():
         notes = r.get("notes", "")
-        if not r.get("sector"):
-            m = re.search(r"sector:(\w+)", notes)
-            if m:
-                r["sector"] = m.group(1); n += 1
         if not r.get("salary"):
             m = re.search(r"pay: ([^;]+)", notes)
             if m:
                 r["salary"] = m.group(1).strip(); n += 1
+    return n
+
+
+def retag_old_rows(rows: dict[str, dict], profile: dict) -> int:
+    """Rows saved by versions before this one carry category / oil & gas tags from older, broader rules. Recompute
+    those display tags once from the title, company and place (statuses, scores and your notes are not touched)."""
+    from .score import score
+    n = 0
+    for r in rows.values():
+        if (r.get("desc_len") or "").strip():
+            continue
+        j = {"title": r.get("title", ""), "company": r.get("company", ""), "location": r.get("location", ""),
+             "country": r.get("country", ""), "description": "", "source": r.get("source", ""), "url": r.get("url", "")}
+        score(j, profile)
+        r["category"], r["sector"] = j["category"], j["sector"]
+        r["desc_len"] = str(_known_len(r))
+        n += 1
     return n
