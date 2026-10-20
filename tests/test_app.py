@@ -229,6 +229,40 @@ class AppAPI(unittest.TestCase):
             (app.DATA / "mail.json").write_text(before, encoding="utf-8")
             (app.DATA / "CV.pdf").unlink(missing_ok=True)
 
+    def test_a_refused_sign_in_is_explained_and_nothing_is_tried_for_outlook(self):
+        import smtplib
+        from unittest import mock
+        (app.DATA / "CV.pdf").write_bytes(b"%PDF-1.4 test")
+        before = (app.DATA / "mail.json").read_text(encoding="utf-8")
+        tried = []
+        try:
+            (app.DATA / "mail.json").write_text('{"user": "me@outlook.com", "password": "pw", "preset": "outlook"}', encoding="utf-8")
+            pub = json.loads(self.req("GET", "/api/mail")[2])
+            self.assertIn("Microsoft switched it off", pub["blocked"])
+            with mock.patch.object(app.smtplib, "SMTP", lambda *a, **k: tried.append(a)):
+                r = json.loads(self.req("POST", "/api/send-manual", {"company": "Nesma", "position": "Site Engineer", "to": "hr@nesma.example",
+                                                                     "subject": "s", "body": "b"})[2])
+                t = json.loads(self.req("POST", "/api/mail-test", {})[2])
+            self.assertEqual(tried, [])                                   # no doomed sign-in, so no Microsoft security alert
+            self.assertFalse(r["ok"]); self.assertTrue(r["settings"])
+            self.assertIn("Gmail", r["error"]); self.assertIn("Nothing was sent", r["error"])
+            self.assertNotIn("SMTPAuthenticationError", r["error"] + t["message"])
+            self.assertEqual(json.loads(self.req("GET", "/api/mail")[2])["signin"], "failed")
+            # Gmail with a wrong password: told to use an app password
+            (app.DATA / "mail.json").write_text('{"user": "me@gmail.com", "password": "pw", "preset": "gmail"}', encoding="utf-8")
+            self.assertEqual(json.loads(self.req("GET", "/api/mail")[2])["blocked"], "")
+            def refuse(m): raise smtplib.SMTPAuthenticationError(535, b"5.7.8 Username and Password not accepted")
+            with mock.patch.object(app, "smtp_connect", refuse):
+                t = json.loads(self.req("POST", "/api/mail-test", {})[2])
+            self.assertIn("app password", t["message"])
+            # changing the settings forgets the old result
+            self.req("POST", "/api/mail", {"user": "other@gmail.com", "password": "abcd efgh ijkl mnop"})
+            self.assertNotIn("signin", json.loads(self.req("GET", "/api/mail")[2]))
+            self.assertIn("internet", app.mail_error(OSError("timed out"), {"preset": "gmail"})[0])
+        finally:
+            (app.DATA / "mail.json").write_text(before, encoding="utf-8")
+            (app.DATA / "CV.pdf").unlink(missing_ok=True)
+
     def test_page_only_reads_and_writes_its_own_files(self):
         for name in ("tracker.csv", "profile.json", "sources.json"):
             self.assertEqual(self.req("GET", "/api/file?path=" + name)[0], 200, name)

@@ -403,9 +403,34 @@ def save_mail(m: dict):
     tracker.atomic_write(DATA / MAIL_FILE, json.dumps(m, indent=2))
 
 
+MS_PERSONAL = re.compile(r"@(outlook|hotmail|live|msn)\.[a-z.]+$", re.I)
+GMAIL_FIX = ("Use a Gmail address instead: turn on 2-Step Verification in your Google account, create an app password at "
+             "myaccount.google.com/apppasswords, then put that address and the 16-letter app password in Settings > E-mail.")
+
+
+def mail_blocked(m: dict) -> str:
+    """Why these settings can't work at all (Outlook.com / Hotmail stopped password sign-in for apps in 2026), or ''."""
+    host = PRESETS.get(m.get("preset", ""), (m.get("smtp_host", ""), 0))[0].lower()
+    if "outlook.com" in host or (MS_PERSONAL.search(m.get("user", "")) and "office365" not in host and m.get("preset") != "gmail"):
+        return ("Outlook.com / Hotmail no longer lets apps sign in with a password - Microsoft switched it off in 2026. " + GMAIL_FIX)
+    return ""
+
+
 def mail_public() -> dict:
     m = mail_settings()
-    return {k: v for k, v in m.items() if k not in ("password", "password_dpapi")} | {"has_password": bool(m.get("password")), "has_cv": (DATA / "CV.pdf").exists()}
+    return ({k: v for k, v in m.items() if k not in ("password", "password_dpapi")}
+            | {"has_password": bool(m.get("password")), "has_cv": (DATA / "CV.pdf").exists(), "blocked": mail_blocked(m)})
+
+
+def note_signin(ok: bool, reason: str = ""):
+    """Remember whether the last sign-in worked, so the page can warn before you write an e-mail that can't be sent."""
+    try:
+        m = mail_settings()
+        if m:
+            m["signin"], m["signin_error"] = ("ok", "") if ok else ("failed", reason[:600])
+            save_mail(m)
+    except Exception:  # noqa - only a hint
+        pass
 
 
 def smtp_connect(m: dict):
@@ -414,10 +439,53 @@ def smtp_connect(m: dict):
         raise ValueError("No SMTP server set")
     if not m.get("user") or not m.get("password"):
         raise ValueError("E-mail address and app password are needed")
+    if mail_blocked(m):
+        raise smtplib.SMTPAuthenticationError(535, b"basic authentication is disabled")   # don't trigger a Microsoft security alert
     s = smtplib.SMTP(host, port, timeout=30)
     s.ehlo(); s.starttls(context=ssl.create_default_context()); s.ehlo()
     s.login(m["user"], m["password"])
     return s
+
+
+def mail_error(e: Exception, m: dict | None = None) -> tuple[str, bool]:
+    """A sign-in or sending failure in plain words, and whether fixing it means changing the e-mail settings."""
+    m = m or {}
+    host = PRESETS.get(m.get("preset", ""), (m.get("smtp_host", ""), 0))[0].lower()
+    user = m.get("user", "")
+    if isinstance(e, ValueError):
+        return str(e), "settings" in str(e).lower() or "app password" in str(e).lower()
+    if isinstance(e, smtplib.SMTPAuthenticationError):
+        if "outlook.com" in host or (MS_PERSONAL.search(user) and "office365" not in host):
+            return ("Outlook.com / Hotmail no longer lets apps sign in with a password - Microsoft switched it off in 2026 - "
+                    f"so the agent can't send from {user or 'that address'}. " + GMAIL_FIX), True
+        if "office365" in host:
+            return ("Microsoft 365 refused the sign-in. Many companies switch off app sign-in for e-mail; ask your IT team, or "
+                    + GMAIL_FIX[0].lower() + GMAIL_FIX[1:]), True
+        if "gmail" in host:
+            return ("Gmail refused the sign-in. It needs an app password (16 letters from myaccount.google.com/apppasswords, "
+                    "with 2-Step Verification on) - your normal Gmail password won't work. Put it in Settings > E-mail."), True
+        return "The mail server refused your address and app password. Check them in Settings > E-mail.", True
+    if isinstance(e, smtplib.SMTPRecipientsRefused):
+        return "The mail server refused the To address (" + ", ".join(e.recipients) + "). Check it and send again.", False
+    if isinstance(e, smtplib.SMTPSenderRefused):
+        return f"The mail server won't send from {user or 'your address'}: {e.smtp_code} {e.smtp_error.decode(errors='replace')[:160]}", True
+    if isinstance(e, smtplib.SMTPResponseException):
+        return f"The mail server didn't accept the e-mail: {e.smtp_code} {e.smtp_error.decode(errors='replace')[:160]}", False
+    if isinstance(e, (OSError, smtplib.SMTPException)):
+        return (f"Couldn't reach the mail server ({host or 'not set'}). Check your internet connection and try again"
+                + (" - or check the SMTP server and port in Settings > E-mail." if not m.get("preset") else ".")), not m.get("preset")
+    return f"{type(e).__name__}: {e}", False
+
+
+def mail_fail(e: Exception) -> dict:
+    try:
+        m = mail_settings()
+    except Exception:  # noqa
+        m = {}
+    text, fix = mail_error(e, m)
+    if isinstance(e, smtplib.SMTPAuthenticationError):
+        note_signin(False, text)
+    return {"ok": False, "error": text + ("" if isinstance(e, ValueError) else " Nothing was sent."), "settings": fix}
 
 
 def tracker_rows() -> list[dict]:
@@ -545,6 +613,8 @@ def _deliver(to: str, subject: str, body: str):
     msg.add_attachment(cv.read_bytes(), maintype="application", subtype="pdf", filename=m.get("cv_name") or "CV.pdf")
     with smtp_connect(m) as s:
         s.send_message(msg)
+    if m.get("signin") != "ok":
+        note_signin(True)
     sent = DATA / "sent"; sent.mkdir(exist_ok=True)
     stamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
     safe = "".join(ch if ch.isalnum() else "-" for ch in subject)[:60].strip("-")
@@ -918,15 +988,21 @@ class Handler(BaseHTTPRequestHandler):
                 m["cc_self"] = bool(d["cc_self"])
             if d.get("password"):
                 m["password"] = str(d["password"])
+            if d.get("password") or before != (m.get("preset"), m.get("smtp_host"), m.get("smtp_port"), m.get("user")):
+                m.pop("signin", None); m.pop("signin_error", None)     # new settings: not tried yet
             save_mail(m)
             return self._json({"ok": True} | mail_public())
         if u.path == "/api/mail-test":
             try:
                 with smtp_connect(mail_settings()):
                     pass
+                note_signin(True)
                 return self._json({"ok": True, "message": "Signed in to the mail server - sending will work."})
             except Exception as e:
-                return self._json({"ok": False, "message": f"{type(e).__name__}: {e}"})
+                text = mail_error(e, mail_settings())[0]
+                if isinstance(e, smtplib.SMTPAuthenticationError):
+                    note_signin(False, text)
+                return self._json({"ok": False, "message": text})
         if u.path == "/api/cv":
             raw = base64.b64decode(d.get("data", ""), validate=True)
             if not raw.startswith(b"%PDF") or len(raw) > 15 * 1024 * 1024:
@@ -942,7 +1018,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 return self._json(send_application(str(d["url"]), str(d["to"]), str(d["subject"]), str(d["body"])))
             except Exception as e:
-                return self._json({"ok": False, "error": f"{type(e).__name__}: {e}"})
+                return self._json(mail_fail(e))
         if u.path == "/api/manual-draft":
             try:
                 return self._json({"ok": True} | manual_draft(str(d.get("company", "")), str(d.get("position", "")), str(d.get("to", "")),
@@ -954,7 +1030,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(send_manual(str(d["company"]), str(d["position"]), str(d["to"]), str(d["subject"]), str(d["body"]),
                                               str(d.get("country", "")), str(d.get("ad", ""))[:20000]))
             except Exception as e:
-                return self._json({"ok": False, "error": f"{type(e).__name__}: {e}" if not isinstance(e, ValueError) else str(e)})
+                return self._json(mail_fail(e))
         if u.path == "/api/apply-site":
             try:
                 return self._json(apply_on_site(str(d["url"])))

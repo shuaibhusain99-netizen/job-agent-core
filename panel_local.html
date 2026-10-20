@@ -185,6 +185,11 @@ dialog.send::backdrop{background:rgba(10,20,22,.45)}
 dialog.send h2{font-family:var(--display);margin:0 0 4px;font-weight:600}
 dialog.send textarea{min-height:280px}
 dialog.send #mcAd{min-height:90px}
+.note{border-radius:var(--r);padding:9px 12px;margin:10px 0;display:flex;gap:8px 12px;align-items:center;flex-wrap:wrap;border-left:3px solid var(--teal);background:var(--teal-soft)}
+.note[hidden]{display:none}
+.note.bad{background:var(--red-soft);border-left-color:var(--red)}
+.note.good{background:var(--green-soft);border-left-color:var(--green)}
+.note span{flex:1 1 260px}
 .toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%) translateY(20px);background:var(--ink);color:var(--paper);padding:9px 14px;border-radius:var(--r);opacity:0;transition:.2s;pointer-events:none;z-index:60;max-width:90vw;display:flex;gap:12px;align-items:center}
 .toast.show{opacity:1;transform:translateX(-50%)}
 .toast.act{pointer-events:auto}
@@ -324,13 +329,14 @@ dialog.send #mcAd{min-height:90px}
         <div class="card" id="mailCard">
           <h3>E-mail applications</h3>
           <p class="hint">Ads that say "send your CV to …" get a Send application button. It sends from your own address with your CV attached and keeps a copy in the sent folder.</p>
-          <div class="field"><label for="mPreset">Mail provider</label><select id="mPreset"><option value="gmail">Gmail</option><option value="outlook">Outlook.com / Hotmail</option><option value="office365">Microsoft 365 (work)</option><option value="yahoo">Yahoo</option><option value="">Other (SMTP)</option></select></div>
+          <div class="field"><label for="mPreset">Mail provider</label><select id="mPreset"><option value="gmail">Gmail</option><option value="outlook">Outlook.com / Hotmail (no longer works)</option><option value="office365">Microsoft 365 (work)</option><option value="yahoo">Yahoo</option><option value="">Other (SMTP)</option></select></div>
           <div id="mCustom" hidden><div class="field"><label for="mHost">SMTP server</label><input type="text" id="mHost" placeholder="smtp.example.com"></div><div class="field"><label for="mPort">Port</label><input type="number" id="mPort" value="587" min="1" max="65535"></div></div>
           <div class="field"><label for="mUser">Your e-mail address</label><input type="email" id="mUser" autocomplete="off"></div>
-          <div class="field"><label for="mPw">App password <span class="faint" id="mPwState"></span></label><input type="password" id="mPw" placeholder="16-character app password" autocomplete="new-password"><span class="small faint">Not your normal password - create an app password in your mail account's security settings. Stored encrypted for your Windows account. Changing the provider or address asks for it again.</span></div>
+          <div class="field"><label for="mPw">App password <span class="faint" id="mPwState"></span></label><input type="password" id="mPw" placeholder="16-character app password" autocomplete="new-password"><span class="small faint">Not your normal password. For Gmail: turn on 2-Step Verification, then create one at myaccount.google.com/apppasswords. Stored encrypted for your Windows account. Changing the provider or address asks for it again.</span></div>
           <div class="field"><label for="mName">Name shown as sender</label><input type="text" id="mName"></div>
           <label class="toggle"><input type="checkbox" id="mCc"> Send me a copy of every application</label>
           <div class="field"><label for="mCv">Your CV, for e-mails and upload boxes <span class="faint" id="mCvState"></span></label><input type="file" id="mCv" accept="application/pdf"></div>
+          <div class="note" id="mNote" role="status" hidden></div>
           <div class="inline"><button class="primary" id="mSave">Save e-mail settings</button><button id="mTest">Test sign-in</button></div>
         </div>
         <div class="card">
@@ -378,10 +384,20 @@ dialog.send #mcAd{min-height:90px}
 
   // ---------- helpers
   function toast(m, act){
-    const t=$("toast"); t.textContent=""; t.append(document.createTextNode(m));
+    const t=$("toast"), host=document.querySelector("dialog[open]")||document.body;   // above an open dialog, never behind it
+    if(t.parentNode!==host) host.append(t);
+    t.textContent=""; t.append(document.createTextNode(m));
     if(act){ const b=document.createElement("button"); b.textContent=act.label; b.addEventListener("click",()=>{ t.classList.remove("show","act"); act.fn(); }); t.append(b); t.classList.add("act"); } else t.classList.remove("act");
     t.classList.add("show"); clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove("show","act"), act?7000:2800);
   }
+  // a message that stays put inside a dialog or card until something changes it
+  function note(el, kind, text, fix){
+    if(!el) return; el.className="note"+(kind?" "+kind:""); el.textContent=""; el.hidden=!text; if(!text) return;
+    const sp=document.createElement("span"); sp.textContent=text; el.append(sp);
+    if(fix){ const b=document.createElement("button"); b.textContent="Open e-mail settings"; b.addEventListener("click",()=>{ if($("sendDlg").open) $("sendDlg").close(); openSettings("mailCard"); }); el.append(b); }
+    if(el.closest("dialog[open]")) el.scrollIntoView({block:"nearest"});
+  }
+  const mailProblem=()=>mail.blocked||(mail.signin==="failed"?(mail.signin_error||"The last sign-in to your mail account failed - check Settings > E-mail."):"");
   const esc = s => String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   const safeHref = u => /^https?:\/\//i.test(u||"") ? u : "#";
   const F_ = "=+-@\t\r", unesc = v => (v && v[0]==="'" && (F_.includes(v[1]||"x") || (v[1]==="'" && F_.includes(v[2]||"x")))) ? v.slice(1) : v;
@@ -723,72 +739,92 @@ dialog.send #mcAd{min-height:90px}
     applyT=setTimeout(tick,2000);
   }
   // ---------- apply by e-mail to a company you name (not from a search)
+  // Closing a send dialog never loses anything: what you typed is kept until it is sent (or you press Start over).
+  let mcSaved=null; const sendSaved={};
   async function openMailCompany(){
-    if(!mail.has_password||!mail.user){ toast("Set up e-mail sending first",{label:"Open settings",fn:()=>openSettings("mailCard")}); return; }
+    if(!mail.user||(!mail.has_password&&!mail.blocked)){ toast("Set up e-mail sending first",{label:"Open settings",fn:()=>openSettings("mailCard")}); return; }
     if(!mail.has_cv){ toast("Add your CV first",{label:"Open settings",fn:()=>openSettings("mailCard")}); return; }
-    const dlg=$("sendDlg");
+    const dlg=$("sendDlg"), k=mcSaved||{};
     const C=["","Saudi Arabia","United Arab Emirates","Qatar","Kuwait","Oman","Bahrain","Canada","Australia"];
-    dlg.innerHTML=`<h2>E-mail a company</h2><p class="muted small">Tell the app who to write to. It writes the application e-mail for this position, you read it, and it sends it from your address with ${esc(mail.cv_name||"your CV")} attached. It then appears in Applications.</p>
-      <div class="field"><label for="mcCompany">Company name</label><input type="text" id="mcCompany" maxlength="120" required></div>
-      <div class="field"><label for="mcPosition">Position</label><input type="text" id="mcPosition" maxlength="150" required placeholder="Site Engineer"></div>
-      <div class="field"><label for="mcTo">Company e-mail <span class="faint">(up to 3, separated by commas)</span></label><input type="text" id="mcTo" maxlength="300" required placeholder="hr@company.com"></div>
-      <div class="field"><label for="mcCountry">Country <span class="faint">(optional)</span></label><select id="mcCountry">${C.map(c=>`<option value="${esc(c)}">${c?esc(c):"Not sure"}</option>`).join("")}</select></div>
-      <div class="field"><label for="mcAd">The job ad <span class="faint">(optional - paste it and the letter is written for it${aiActive?", by the AI reviewer":""})</span></label><textarea id="mcAd" rows="4" maxlength="20000"></textarea></div>
-      <div class="inline" style="justify-content:flex-end"><button id="mcCancel">Cancel</button><button class="primary" id="mcWrite">Write the e-mail</button></div>
+    dlg.innerHTML=`<h2>E-mail a company</h2><p class="muted small">Tell the app who to write to. It writes the application e-mail for this position, you read it, and it sends it from ${esc(mail.user)} with ${esc(mail.cv_name||"your CV")} attached. It then appears in Applications.</p>
+      <div class="note bad" id="mcProblem" role="alert" hidden></div>
+      <div class="field"><label for="mcCompany">Company name</label><input type="text" id="mcCompany" maxlength="120" required value="${esc(k.company)}"></div>
+      <div class="field"><label for="mcPosition">Position</label><input type="text" id="mcPosition" maxlength="150" required placeholder="Site Engineer" value="${esc(k.position)}"></div>
+      <div class="field"><label for="mcTo">Company e-mail <span class="faint">(up to 3, separated by commas)</span></label><input type="text" id="mcTo" maxlength="300" required placeholder="hr@company.com" value="${esc(k.to)}"></div>
+      <div class="field"><label for="mcCountry">Country <span class="faint">(optional)</span></label><select id="mcCountry">${C.map(c=>`<option value="${esc(c)}" ${c===(k.country||"")?"selected":""}>${c?esc(c):"Not sure"}</option>`).join("")}</select></div>
+      <div class="field"><label for="mcAd">The job ad <span class="faint">(optional - paste it and the letter is written for it${aiActive?", by the AI reviewer":""})</span></label><textarea id="mcAd" rows="4" maxlength="20000">${esc(k.ad)}</textarea></div>
+      <div class="inline" style="justify-content:flex-end"><button class="quiet" id="mcClear" ${mcSaved?"":"hidden"}>Start over</button><button id="mcCancel">Close</button><button class="primary" id="mcWrite">Write the e-mail</button></div>
       <div id="mcDraft" hidden></div>`;
-    const v=id=>$(id).value.trim();
-    let orig=null;
-    const changed=()=>!!(v("mcCompany")||v("mcPosition")||v("mcTo")||v("mcAd"));
-    const close=()=>{ if(changed()&&!confirm("Close and lose this e-mail?")) return; dlg.close(); };
+    const v=id=>$(id).value.trim(), have=id=>$(id)?$(id).value:"";
+    const keep=()=>{ const d={company:v("mcCompany"),position:v("mcPosition"),to:v("mcTo"),country:$("mcCountry").value,ad:$("mcAd").value,sub:have("mcSub"),body:have("mcBody"),by_ai:k.by_ai};
+      mcSaved=(d.company||d.position||d.to||d.ad.trim()||d.body)?d:null; };
+    const close=()=>{ keep(); dlg.close(); if(mcSaved) toast("Draft kept - press E-mail a company to carry on"); };
     dlg.oncancel=e=>{ e.preventDefault(); close(); };
     $("mcCancel").addEventListener("click",close);
+    $("mcClear").addEventListener("click",()=>{ mcSaved=null; openMailCompany(); });
+    const problem=mailProblem(); note($("mcProblem"),"bad",problem?"This e-mail can't be sent yet. "+problem:"",!!problem);
     const emailsOK=()=>{ const l=v("mcTo").split(/[,;\s]+/).filter(Boolean); return l.length>=1&&l.length<=3&&l.every(x=>/^[^@\s]+@[^@\s]+\.[a-z]{2,24}$/i.test(x)); };
+    const showDraft=(subject,body,byAi)=>{
+      k.by_ai=byAi; $("mcDraft").hidden=false;
+      $("mcDraft").innerHTML=`<hr style="border:0;border-top:1px solid var(--rule);margin:14px 0">
+        <p class="small muted">${byAi?"Written by the AI reviewer for this ad - read it before you send.":"Written from your CV facts for this position - read it, change anything you like."}</p>
+        <div class="field"><label for="mcSub">Subject</label><input type="text" id="mcSub" maxlength="200" value="${esc(subject)}"></div>
+        <div class="field"><label for="mcBody">Message</label><textarea id="mcBody" style="min-height:260px">${esc(body)}</textarea></div>
+        <div class="note" id="mcMsg" role="alert" hidden></div>
+        <div class="inline" style="justify-content:flex-end"><span class="small faint" id="mcToShow"></span><button class="primary" id="mcSend">Send application</button></div>`;
+      $("mcToShow").textContent="To: "+v("mcTo");
+      $("mcWrite").textContent="Write it again";
+      if(mail.blocked){ $("mcSend").disabled=true; $("mcSend").title="Change the e-mail settings first"; }
+      $("mcSend").addEventListener("click",async()=>{
+        const s=$("mcSend"), msg=$("mcMsg");
+        if(!emailsOK()){ note(msg,"bad","Check the company e-mail address."); $("mcTo").focus(); return; }
+        s.disabled=true; s.textContent="Sending…"; note(msg,"","Signing in to your mail account and sending - this takes a few seconds.");
+        try{ const r=await api("/api/send-manual",{company:v("mcCompany"),position:v("mcPosition"),to:v("mcTo"),country:$("mcCountry").value,ad:$("mcAd").value,subject:$("mcSub").value.trim(),body:$("mcBody").value});
+          if(r.ok){ mcSaved=null; dlg.close(); toast("Application sent to "+r.to+(r.warning?" - but "+r.warning:" - it's in Applications now")); loadAll(true); loadMail(); return; }
+          note(msg,"bad",r.error||"Not sent.",!!r.settings); if(r.settings) loadMail(); }
+        catch(e){ note(msg,"bad","Not sent: "+e.message); }
+        s.disabled=!!mail.blocked; s.textContent="Send application"; });
+    };
+    if(k.body) showDraft(k.sub,k.body,k.by_ai);
     $("mcWrite").addEventListener("click",async()=>{
       for(const id of ["mcCompany","mcPosition","mcTo"]) if(!$(id).reportValidity()) return;
       if(!emailsOK()){ toast("Check the company e-mail address"); $("mcTo").focus(); return; }
+      if($("mcBody")&&$("mcBody").value.trim()&&!confirm("Write a new e-mail? Your changes to this one will be replaced.")) return;
       const b=$("mcWrite"); b.disabled=true; b.textContent="Writing…";
       try{ const d=await api("/api/manual-draft",{company:v("mcCompany"),position:v("mcPosition"),to:v("mcTo"),country:$("mcCountry").value,ad:$("mcAd").value});
         if(d.ok===false){ toast(d.error||"Couldn't write it"); return; }
-        $("mcDraft").hidden=false;
-        $("mcDraft").innerHTML=`<hr style="border:0;border-top:1px solid var(--rule);margin:14px 0">
-          <p class="small muted">${d.by_ai?"Written by the AI reviewer for this ad - read it before you send.":"Written from your CV facts for this position - read it, change anything you like."}</p>
-          <div class="field"><label for="mcSub">Subject</label><input type="text" id="mcSub" maxlength="200" value="${esc(d.subject)}"></div>
-          <div class="field"><label for="mcBody">Message</label><textarea id="mcBody" style="min-height:260px">${esc(d.body)}</textarea></div>
-          <div class="inline" style="justify-content:flex-end"><span class="small faint">To: ${esc(v("mcTo"))}</span><button class="primary" id="mcSend">Send application</button></div>`;
-        b.textContent="Write it again";
-        $("mcSend").addEventListener("click",async()=>{
-          const s=$("mcSend"); if(!emailsOK()){ toast("Check the company e-mail address"); return; }
-          s.disabled=true; s.textContent="Sending…";
-          try{ const r=await api("/api/send-manual",{company:v("mcCompany"),position:v("mcPosition"),to:v("mcTo"),country:$("mcCountry").value,ad:$("mcAd").value,subject:$("mcSub").value.trim(),body:$("mcBody").value});
-            if(r.ok){ dlg.close(); toast("Application sent to "+r.to+(r.warning?" - but "+r.warning:" - it's in Applications now")); loadAll(true); }
-            else { toast(r.error||"Not sent"); s.disabled=false; s.textContent="Send application"; } }
-          catch(e){ toast("Not sent: "+e.message); s.disabled=false; s.textContent="Send application"; } });
-        $("mcSub").focus(); $("mcDraft").scrollIntoView({block:"start"});
+        showDraft(d.subject,d.body,d.by_ai); $("mcSub").focus(); $("mcDraft").scrollIntoView({block:"start"});
       }catch(e){ toast("Couldn't write it: "+e.message); }
       finally{ b.disabled=false; if(b.textContent==="Writing…") b.textContent="Write the e-mail"; }
     });
-    dlg.showModal(); $("mcCompany").focus();
+    dlg.showModal(); (k.body?$("mcBody"):$("mcCompany")).focus();
   }
   $("mailCo").addEventListener("click",openMailCompany);
   async function openSend(r){
-    if(!mail.has_password||!mail.user){ toast("Set up e-mail sending first",{label:"Open settings",fn:()=>openSettings("mailCard")}); return; }
+    if(!mail.user||(!mail.has_password&&!mail.blocked)){ toast("Set up e-mail sending first",{label:"Open settings",fn:()=>openSettings("mailCard")}); return; }
     if(!mail.has_cv){ toast("Add your CV first",{label:"Open settings",fn:()=>openSettings("mailCard")}); return; }
-    let d; try{ d=await api("/api/draft?url="+encodeURIComponent(r.url)); }catch(e){ toast("Couldn't prepare the e-mail: "+e.message); return; }
+    let d=sendSaved[r.url];
+    if(!d){ try{ d=await api("/api/draft?url="+encodeURIComponent(r.url)); }catch(e){ toast("Couldn't prepare the e-mail: "+e.message); return; } }
     const dlg=$("sendDlg");
     dlg.innerHTML=`<h2>Send application</h2><p class="muted small">${esc(r.title)} at ${esc(r.company)}. Edit anything, then send. ${esc(mail.cv_name||"CV.pdf")} is attached.</p>
+      <div class="note bad" id="sProblem" role="alert" hidden></div>
       <div class="field"><label for="sTo">To</label><input type="text" id="sTo" value="${esc(d.to)}"></div><div class="field"><label for="sSub">Subject</label><input type="text" id="sSub" value="${esc(d.subject)}"></div>
       <div class="field"><label for="sBody">Message</label><textarea id="sBody">${esc(d.body)}</textarea></div>
-      <div class="inline" style="justify-content:flex-end"><button id="sCancel">Cancel</button><button class="primary" id="sSend">Send application</button></div>`;
-    const orig=[d.to,d.subject,d.body].join("\u0000");
-    const changed=()=>[$("sTo").value,$("sSub").value,$("sBody").value].join("\u0000")!==orig;
-    const close=()=>{ if(changed()&&!confirm("Close and lose your changes to this e-mail?")) return false; dlg.close(); return true; };
+      <div class="note" id="sMsg" role="alert" hidden></div>
+      <div class="inline" style="justify-content:flex-end"><button id="sCancel">Close</button><button class="primary" id="sSend">Send application</button></div>`;
+    const close=()=>{ sendSaved[r.url]={to:$("sTo").value,subject:$("sSub").value,body:$("sBody").value}; dlg.close(); };
     dlg.oncancel=e=>{ e.preventDefault(); close(); };
     $("sCancel").addEventListener("click",close);
+    const problem=mailProblem(); note($("sProblem"),"bad",problem?"This e-mail can't be sent yet. "+problem:"",!!problem);
+    if(mail.blocked){ $("sSend").disabled=true; $("sSend").title="Change the e-mail settings first"; }
     dlg.showModal(); $("sTo").focus();
-    $("sSend").addEventListener("click",async()=>{ const b=$("sSend"); b.disabled=true; b.textContent="Sending…";
+    $("sSend").addEventListener("click",async()=>{ const b=$("sSend"), msg=$("sMsg"); b.disabled=true; b.textContent="Sending…";
+      note(msg,"","Signing in to your mail account and sending - this takes a few seconds.");
       try{ const res=await api("/api/send",{url:r.url,to:$("sTo").value.trim(),subject:$("sSub").value.trim(),body:$("sBody").value});
-        if(res.ok){ dlg.close(); Object.assign(r,{status:"Applied",applied_date:r.applied_date||today()}); render(); paintHead(r); toast("Application sent to "+res.to+(res.warning?" - but "+res.warning:"")); } else { toast(res.error||"Not sent"); b.disabled=false; b.textContent="Send application"; } }
-      catch(e){ toast("Not sent: "+e.message); b.disabled=false; b.textContent="Send application"; } });
+        if(res.ok){ delete sendSaved[r.url]; dlg.close(); Object.assign(r,{status:"Applied",applied_date:r.applied_date||today()}); render(); paintHead(r); toast("Application sent to "+res.to+(res.warning?" - but "+res.warning:"")); loadMail(); return; }
+        note(msg,"bad",res.error||"Not sent.",!!res.settings); if(res.settings) loadMail(); }
+      catch(e){ note(msg,"bad","Not sent: "+e.message); }
+      b.disabled=!!mail.blocked; b.textContent="Send application"; });
   }
 
   // ---------- keyboard
@@ -923,12 +959,28 @@ dialog.send #mcAd{min-height:90px}
     $("mPreset").value=mail.preset??"gmail"; $("mCustom").hidden=!!$("mPreset").value; $("mHost").value=mail.smtp_host||""; $("mPort").value=mail.smtp_port||587;
     $("mUser").value=mail.user||""; $("mName").value=mail.from_name||""; $("mCc").checked=!!mail.cc_self;
     $("mPwState").textContent=mail.has_password?"(saved)":"(not set)"; $("mCvState").textContent=mail.has_cv?"- "+(mail.cv_name||"CV.pdf")+" is saved":"- none yet";
+    mailNote();
   }
-  $("mPreset").addEventListener("change",()=>{ $("mCustom").hidden=!!$("mPreset").value; });
+  function mailNote(){
+    const n=$("mNote");
+    if($("mPreset").value==="outlook"&&mail.preset!=="outlook") return note(n,"bad","Outlook.com / Hotmail no longer lets apps sign in with a password - Microsoft switched it off in 2026. Pick Gmail and use a Gmail app password instead.");
+    if(mail.blocked) return note(n,"bad",mail.blocked);
+    if(mail.signin==="failed") return note(n,"bad",mail.signin_error||"The last sign-in failed.");
+    if(mail.signin==="ok") return note(n,"good","Signed in to "+mail.user+" - sending works.");
+    note(n,"",mail.has_password?"Not tested yet - press Test sign-in.":"");
+  }
+  async function testMail(){
+    const b=$("mTest"); b.disabled=true; note($("mNote"),"","Signing in to your mail account…");
+    try{ const r=await api("/api/mail-test",{}); await loadMail(); if(!r.ok) note($("mNote"),"bad",r.message); }
+    catch(e){ note($("mNote"),"bad",e.message); }
+    b.disabled=false;
+  }
+  $("mPreset").addEventListener("change",()=>{ $("mCustom").hidden=!!$("mPreset").value; mailNote(); });
   $("mSave").addEventListener("click",async()=>{ if(!$("mUser").reportValidity()||!$("mPort").reportValidity()) return;
     try{ const d={preset:$("mPreset").value,smtp_host:$("mHost").value.trim(),smtp_port:+$("mPort").value||587,user:$("mUser").value.trim(),from_name:$("mName").value.trim(),cc_self:$("mCc").checked}; if($("mPw").value) d.password=$("mPw").value;
-      const r=await api("/api/mail",d); if(r.ok===false) throw new Error(r.error); $("mPw").value=""; toast(r.has_password?"E-mail settings saved":"Saved - enter the app password for this account"); loadMail(); }catch(e){ toast("Not saved: "+e.message); } });
-  $("mTest").addEventListener("click",async()=>{ const b=$("mTest"); b.disabled=true; try{ const r=await api("/api/mail-test",{}); toast(r.message); }catch(e){ toast(e.message); } b.disabled=false; });
+      const r=await api("/api/mail",d); if(r.ok===false) throw new Error(r.error); $("mPw").value=""; toast(r.has_password?"E-mail settings saved":"Saved - enter the app password for this account"); await loadMail();
+      if(r.has_password&&!r.blocked&&r.signin!=="ok") testMail(); }catch(e){ toast("Not saved: "+e.message); } });
+  $("mTest").addEventListener("click",testMail);
   $("mCv").addEventListener("change",async()=>{ const f=$("mCv").files[0]; if(!f) return; const buf=new Uint8Array(await f.arrayBuffer()); let bin=""; for(let i=0;i<buf.length;i+=8192) bin+=String.fromCharCode.apply(null,buf.subarray(i,i+8192)); try{ const r=await api("/api/cv",{name:f.name,data:btoa(bin)}); toast(r.ok?"CV saved: "+r.name:(r.error||"Not saved")); loadMail(); }catch(e){ toast("Not saved: "+e.message); } });
 
   window.addEventListener("beforeunload",e=>{ if(searchDirty||keysDirty||meDirty||boardsDirty){ e.preventDefault(); e.returnValue=""; } });
