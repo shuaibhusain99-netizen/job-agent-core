@@ -10,7 +10,7 @@ Safety rules:
   can't be read at all is never overwritten.
 """
 from __future__ import annotations
-import csv, io, os, re, secrets, threading, time
+import csv, shutil, io, os, re, secrets, threading, time
 from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
@@ -45,7 +45,7 @@ def locked(path: Path, wait: float = 60):
             except FileExistsError:
                 try:
                     if time.time() - lf.stat().st_mtime > 300:      # left behind by a crash
-                        lf.unlink()
+                        _break_stale(lf)
                         continue
                 except OSError:
                     pass
@@ -62,13 +62,38 @@ def locked(path: Path, wait: float = 60):
                 pass
 
 
+def _break_stale(lf: Path) -> None:
+    """Take a crashed writer's lock file away - safely when two programs (the app and the daily task) try at once:
+    the file is first renamed to a name only this program knows (only one rename can succeed); if what was taken turns
+    out to be fresh (someone else had just re-created it), it is put back."""
+    grab = lf.with_name(f"{lf.name}.{os.getpid()}.{secrets.token_hex(3)}.stale")
+    try:
+        os.rename(lf, grab)
+    except OSError:
+        return                                      # someone else got there first
+    try:
+        if time.time() - grab.stat().st_mtime <= 300:
+            try:
+                os.rename(grab, lf)                 # it was a live lock: give it back (fails if a new one exists)
+                return
+            except OSError:
+                pass
+        grab.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 def atomic_write(path: Path, data, encoding: str = "utf-8") -> None:
     path = Path(path)
     tmp = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.{secrets.token_hex(3)}.tmp")
-    if isinstance(data, str):
-        tmp.write_text(data, encoding=encoding, newline="")
-    else:
-        tmp.write_bytes(data)
+    raw = data.encode(encoding) if isinstance(data, str) else data
+    with open(tmp, "wb") as f:
+        f.write(raw)
+        f.flush()
+        try:
+            os.fsync(f.fileno())                      # on disk before it replaces the old file (power cut, sleep)
+        except OSError:
+            pass
     for i in range(10):
         try:
             os.replace(tmp, path)
@@ -86,11 +111,11 @@ FORMULA = ("=", "+", "-", "@", "\t", "\r")
 
 def _esc(v) -> str:
     v = "" if v is None else str(v)
-    return "'" + v if v[:1] in FORMULA else v
+    return "'" + v if v[:1] in FORMULA or (v[:1] == "'" and v[1:2] in FORMULA) else v
 
 
 def _unesc(v: str) -> str:
-    return v[1:] if v[:1] == "'" and v[1:2] in FORMULA else v
+    return v[1:] if v[:1] == "'" and (v[1:2] in FORMULA or (v[1:2] == "'" and v[2:3] in FORMULA)) else v
 
 
 def _s(v) -> str:
@@ -123,7 +148,15 @@ def _decode(raw: bytes) -> str:
     try:
         return raw.decode("utf-8-sig")
     except UnicodeDecodeError:
-        return raw.decode("cp1252", errors="replace")       # re-saved by Excel as "CSV (Comma delimited)"
+        pass
+    # re-saved by Excel as "CSV (Comma delimited)": Excel writes this PC's Windows code page (Arabic Windows: cp1256)
+    import locale
+    for enc in (locale.getpreferredencoding(False), "cp1252"):
+        try:
+            return raw.decode(enc)
+        except (UnicodeDecodeError, LookupError):
+            continue
+    return raw.decode("cp1252", errors="replace")
 
 
 def load(path: Path) -> dict[str, dict]:
@@ -145,15 +178,40 @@ def load(path: Path) -> dict[str, dict]:
             if r.get(k):
                 r[k] = norm_date(r[k])
         if r.get("url"):
+            st = _s(r.get("status")).strip()
+            r["status"] = CANON_STATUS.get(st.lower(), st)          # 'applied' typed in Excel is Applied
+            old = rows.get(r["url"])
+            if old is not None:                                     # the same link twice (a copy-paste in Excel)
+                r = _merge_same(old, r)
             r["__orig"] = tuple(r.get(k, "") for k in USER_FIELDS)
             rows[r["url"]] = r
     return rows
 
 
+CANON_STATUS = {s.lower(): s for s in ("New", "Review", "Applied", "Interview", "Offer", "Rejected", "Skipped", "Found (apply off)")}
+
+
+def _signal(r: dict) -> tuple:
+    return (r.get("status") in ("Applied", "Interview", "Offer", "Rejected"), bool(_s(r.get("applied_date")).strip()),
+            bool(_s(r.get("touched")).strip()), bool(_s(r.get("user_notes")).strip()))
+
+
+def _merge_same(a: dict, b: dict) -> dict:
+    """Two rows with one link: keep the one you acted on, and keep both notes."""
+    keep, other = (a, b) if _signal(a) >= _signal(b) else (b, a)
+    na, nb = _s(keep.get("user_notes")).strip(), _s(other.get("user_notes")).strip()
+    if nb and nb not in na:
+        keep["user_notes"] = (na + " | " + nb).strip(" |")
+    return keep
+
+
 def to_csv(rows: dict[str, dict], extra: tuple = ()) -> str:
-    """The list as CSV text: newest first; within a day, best match first."""
+    """The list as CSV text: newest first; within a day, best match first. Columns this version doesn't know (written by
+    a newer version) are kept, so going back to an older exe and forward again loses nothing."""
     buf = io.StringIO()
-    fields = FIELDS + list(extra)
+    known = set(FIELDS) | set(extra)
+    other = sorted({k for r in rows.values() for k in r if k and k not in known and not k.startswith("_") and not k.startswith("was_")})
+    fields = FIELDS + list(extra) + other
     w = csv.DictWriter(buf, fieldnames=fields, extrasaction="ignore", lineterminator="\r\n")
     w.writeheader()
     for r in sorted(rows.values(), key=lambda r: (_s(r.get("found_date")), _int(r.get("score"))), reverse=True):
@@ -162,7 +220,14 @@ def to_csv(rows: dict[str, dict], extra: tuple = ()) -> str:
 
 
 def write(path: Path, rows: dict[str, dict], extra: tuple = ()) -> None:
-    """Write as-is (caller holds the lock)."""
+    """Write as-is (caller holds the lock). The job list's previous version is kept as tracker.bak.csv."""
+    path = Path(path)
+    if path.name == "tracker.csv" and path.exists():
+        try:
+            if path.stat().st_size > 200:
+                shutil.copyfile(path, path.with_name("tracker.bak.csv"))
+        except OSError:
+            pass
     atomic_write(path, "\ufeff" + to_csv(rows, extra))
 
 
@@ -220,8 +285,42 @@ def recover_pending(path: Path) -> dict[str, dict] | None:
     return merged
 
 
+def _damaged(path: Path) -> bool:
+    """Empty, or cut off in the middle of a line - what a power cut or a sync tool can leave behind."""
+    try:
+        raw = Path(path).read_bytes()
+    except OSError:
+        return False
+    return len(raw.strip(b"\xef\xbb\xbf \r\n\t")) == 0 or not raw.endswith(b"\n")
+
+
+def restore_if_damaged(path: Path) -> bool:
+    """A damaged job list is replaced by the last good copy (tracker.bak.csv); the damaged file is kept aside."""
+    path = Path(path)
+    bak = path.with_name("tracker.bak.csv")
+    if not path.exists() or not _damaged(path) or not bak.exists() or _damaged(bak):
+        return False
+    try:
+        good = load(bak)
+        if not good:
+            return False
+        try:
+            now = load(path)
+        except Unreadable:
+            now = {}
+        if now and len(now) >= 0.9 * len(good):
+            return False                              # no final line break, but complete (another program saved it)
+        shutil.copyfile(path, path.with_name(f"tracker.damaged-{int(time.time())}.csv"))
+        shutil.copyfile(bak, path)
+    except (OSError, Unreadable):
+        return False
+    log("The job list was damaged (empty or cut off) - restored the last good copy")
+    return True
+
+
 def load_current(path: Path) -> dict[str, dict]:
     """The list as it stands, including results waiting in tracker.pending.csv. Caller holds the lock."""
+    restore_if_damaged(path)
     merged = recover_pending(path)
     return merged if merged is not None else load(path)
 
@@ -325,6 +424,9 @@ def rejudgeable(row: dict) -> bool:
     return _untouched(row) or auto_skipped(row)
 
 
+SAVED_MAX = 8000
+
+
 def text_len(j: dict) -> int:
     """How much of the ad a job was judged on. A listing teaser (SEEK's bullet points, a Bayt summary) counts as a
     listing however long it is, so the full ad is still read for a match."""
@@ -353,7 +455,7 @@ def refresh(row: dict, j: dict, apply_countries: list[str] | None = None, seen: 
     if not rejudgeable(row):
         return changed
     new_len = text_len(j)
-    if new_len < _known_len(row):
+    if new_len < min(_known_len(row), SAVED_MAX):        # saved ads are kept to 8,000 characters
         return changed
     if new_len > _known_len(row):
         row["desc_len"] = str(new_len)                  # remember the full ad was read, so it isn't fetched again
@@ -472,8 +574,9 @@ def merge_duplicates(rows: dict[str, dict]) -> list[str]:
             groups.setdefault(k, []).append(u)
     removed = []
     for urls in groups.values():
-        if len(urls) < 2 or len({site_key(u) for u in urls}) < 2:
-            continue
+        sites = [site_key(u) for u in urls]
+        if len(urls) < 2 or len(set(sites)) < 2 or len(set(sites)) != len(urls):
+            continue                     # several openings on one site: not one job seen twice
         mine = {u for u in urls if not (rejudgeable(rows[u]) or rows[u].get("status") == "Found (apply off)")}
         keep = max(urls, key=lambda u: (u in mine, rows[u].get("status") in OPEN, _known_len(rows[u]), _int(rows[u].get("score"))))
         for u in urls:

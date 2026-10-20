@@ -117,6 +117,7 @@ def _run(args) -> int:
     n = tracker.release_found(known, apply_countries)
     if n:
         log(f"{n} matches moved to To apply (applying is on for their country now)")
+    packs_of = {u: r.get("pack_file", "") for u, r in known.items()}
     merged = tracker.merge_duplicates(known)
     for u in merged:
         util.KNOWN.discard(u)
@@ -128,8 +129,7 @@ def _run(args) -> int:
         sk = util.same_job_key(r)
         if sk:
             known_tcc.setdefault(sk, u)
-    for r in tracker.sweep_titles(known, PROFILE):
-        drop_pack(r)
+    tracker.sweep_titles(known, PROFILE)          # packs of archived rows are removed only after saving (you may act meanwhile)
 
     # 3. score on what the listing gives, then fetch the full ad for promising jobs and re-score.
     #    Known jobs are re-read only if they are still open in your list and were judged on a snippet.
@@ -212,7 +212,6 @@ def _run(args) -> int:
             updated += res == "updated"
             if res == "skipped":
                 skipped += 1
-                drop_pack(row)
             elif row.get("status") == "New" and not row.get("pack_file"):
                 row["pack_file"] = write_pack(dict(j, url=row["url"]))      # re-judged as a match: it needs its letter too
             continue
@@ -251,11 +250,14 @@ def _run(args) -> int:
         return 0
     for r in tracker.save(TRACKER, known, dropped=merged):
         drop_pack(r)
+    with tracker.locked(TRACKER):
+        saved = tracker.load_current(TRACKER)
+    for u in merged:                                # duplicates merged away: their packs go too (unless you kept the row)
+        if u not in saved and packs_of.get(u):
+            drop_pack({"pack_file": packs_of[u]})
     save_state(full, sig, counts, len(raw))
     _save_seen(seen_before, unique)
-    with tracker.locked(TRACKER):
-        keep = tracker.load_current(TRACKER).keys()
-    details.prune(keep)
+    details.prune(saved.keys())
     return 0
 
 

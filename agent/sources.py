@@ -279,7 +279,7 @@ def fetch_seek(cfg: dict, profile: dict) -> list[dict]:
     for q in cfg.get("queries", ["civil engineer"]) + profile["search"].get("queries_other", []) + profile["search"].get("queries_oilgas", []):
         for page in range(1, int(cfg.get("pages", 2)) + 1):
             url = ("https://www.seek.com.au/api/jobsearch/v5/search?siteKey=AU-Main&sourcesystem=houston"
-                   f"&keywords={quote_plus(q)}&page={page}&pageSize=50&locale=en-AU&sortmode=ListedDate&daterange={days}")
+                   f"&keywords={quote_plus(q)}&page={page}&pageSize=100&locale=en-AU&sortmode=ListedDate&daterange={days}")
             status, data = http_json(url)
             if status != 200 or not data:
                 log(f"SEEK: HTTP {status} on '{q}' p{page}")
@@ -303,7 +303,7 @@ def fetch_seek(cfg: dict, profile: dict) -> list[dict]:
                     out.append(j)
                 except Exception:
                     continue
-            if len(rows) < 50 or (_quick() and not unknown):
+            if len(rows) < 100 or (_quick() and not unknown):
                 break                                       # newest first: a page of jobs you already have = the rest is older
             time.sleep(0.6)
     log(f"SEEK: {len(out)} rows")

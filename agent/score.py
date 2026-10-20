@@ -24,12 +24,25 @@ REQ_TALK = re.compile(r"\b(need|needs|require[sd]?|must|should|candidates?|appli
                       r"possess|hold|holding)\b", re.I)
 
 
+WORDNUM = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+           "twelve": 12, "fifteen": 15}
+
+
+def _prep_years(text: str) -> str:
+    """'three (3) years' / 'five years' -> numbers; 'Experience\n2 to 5 Years' (label above the value) -> one line."""
+    t = re.sub(r"\*\*|__|\*", " ", text)
+    t = re.sub(r"\b(\w+)\s*\(\s*(\d{1,2})\s*\+?\s*\)\s*(?=years?|yrs?)", r"\2 ", t, flags=re.I)
+    t = re.sub(r"\b(" + "|".join(WORDNUM) + r")\b(?=\s*(?:\+\s*)?(?:years?|yrs?)\b)", lambda m: str(WORDNUM[m.group(1).lower()]), t, flags=re.I)
+    return re.sub(r"(experience)\s*:?\s*\n\s*(?=\d{1,2}\s*(?:\+|-|–|to|years?\b|yrs?\b))", r"\1: ", t, flags=re.I)
+
+
 def required_years(text: str, company: str = "") -> tuple[int | None, int | None]:
     """(min, max) years of experience the posting asks for. Only sentences about the candidate's experience count:
     'a company with 25 years of history', 'a 2-year contract' and 'we have 30 years of experience' are ignored -
     judged on the words just before the number, so a long paragraph that mentions 'we' elsewhere still counts."""
     co = re.sub(r"\s+(contracting|company|co|llc|ltd|group|corporation|inc)\b.*$", "", (company or "").lower()).strip()
     co = co if len(co) >= 3 and co not in ("unknown",) else ""
+    text = _prep_years(text)
     # sentence ends: . ; newline, bullets, and a spaced dash/plus that is NOT between two numbers ('5 - 7 years' stays whole)
     for sent in re.split(r"\.(?!\d)|[;\n•●▪]|(?<!\d)\s[-+]\s(?!\d)", text):
         if not EXP_WORD.search(sent):
@@ -71,6 +84,18 @@ def find_salary(text: str) -> str:
     return ""
 
 
+PAY_FLOOR = {"AED": 6000, "SAR": 6000, "SR": 6000, "QAR": 6000, "QR": 6000, "KWD": 500, "KD": 500, "OMR": 600, "RO": 600}
+
+
+def _pay_below_floor(sal: str) -> bool:
+    """A monthly Gulf salary clearly below an engineer's (yearly amounts are left alone)."""
+    m = re.search(r"\b(AED|SAR|SR|QAR|QR|KWD|KD|OMR|RO)\b", sal or "", re.I)
+    if not m:
+        return False
+    nums = [float(x.replace(",", "")) * (1000 if k else 1) for x, k in re.findall(r"(\d[\d,]*(?:\.\d+)?)\s*([kK])?", sal)]
+    return bool(nums) and max(nums) < PAY_FLOOR[m.group(1).upper()]
+
+
 # ------------------------------------------------------------------ application e-mail
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,24}")
 EMAIL_SKIP = re.compile(r"noreply|no-reply|donotreply|do-not-reply|unsubscribe|privacy|abuse@|postmaster@|webmaster@|@linkedin|@indeed|"
@@ -110,6 +135,11 @@ def find_level(j: dict, profile: dict) -> str:
     """starter / support / match / senior - from the title first, then the experience the ad asks for."""
     lv = profile.get("levels") or {}
     t = j["title"].lower()
+    m = re.match(r"seniority level:\s*([a-z -]+)\.", j.get("description", "").lower())     # LinkedIn's own label
+    if m and m.group(1).strip() in ("director", "executive"):
+        return "senior"
+    if m and m.group(1).strip() in ("entry level", "internship") and not (lv.get("senior") and re.search(lv["senior"], t, re.I)):
+        return "starter"
     for name in ("senior", "starter", "support"):
         if lv.get(name) and re.search(lv[name], t, re.I):
             return name
@@ -234,7 +264,17 @@ def score(j: dict, profile: dict) -> tuple[int, str, list[str]]:
                 reasons.insert(1, "needs a work visa - the ad doesn't say they sponsor")
         elif verdict == "apply":
             reasons.insert(1, "may sponsor a visa")
+    if not j.get("country") and verdict == "apply":
+        verdict = "maybe"                          # where the job is isn't known: worth a look, not a send
+        reasons.insert(1, "country unknown - check where the job is")
+    if not j.get("country"):
+        j["_cap"] = "maybe"
     j["salary"] = find_salary(j["title"] + " " + j.get("description", ""))
+    low = _pay_below_floor(j["salary"])
+    if low and verdict == "apply":
+        verdict = "maybe"                          # a monthly pay far below an engineer's
+        reasons.insert(1, f"pay looks low ({j['salary']})")
+        j["_cap"] = "maybe"
     j["apply_email"] = find_apply_email(j.get("description", ""))
     tags = (["sector:" + j["sector"]] if j["sector"] else []) + (["pay: " + j["salary"]] if j["salary"] else []) \
         + (["apply by e-mail"] if j["apply_email"] else [])

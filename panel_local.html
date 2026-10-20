@@ -380,7 +380,7 @@ dialog.send textarea{min-height:280px}
   }
   const esc = s => String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   const safeHref = u => /^https?:\/\//i.test(u||"") ? u : "#";
-  const unesc = v => (v && v[0]==="'" && "=+-@\t\r".includes(v[1]||"x")) ? v.slice(1) : v;
+  const F_ = "=+-@\t\r", unesc = v => (v && v[0]==="'" && (F_.includes(v[1]||"x") || (v[1]==="'" && F_.includes(v[2]||"x")))) ? v.slice(1) : v;
   async function api(path, body, opts){
     const h={"X-JobAgent-Token":TOKEN}; if(body) h["Content-Type"]="application/json";
     let r; try{ r=await fetch(path, Object.assign(body?{method:"POST",headers:h,body:JSON.stringify(body)}:{headers:h}, opts||{})); }
@@ -451,6 +451,7 @@ dialog.send textarea{min-height:280px}
     try{
       const s=await api("/api/status");
       const lr=(s.runs||[])[0];
+      if(s.updating&&!s.running){ setState("busy","Updating your list to the new matching rules - a few seconds"); clearTimeout(pollT); lastRunAt=null; pollT=setTimeout(()=>loadAll(true),3000); return; }
       if(s.running){ const last=s.elsewhere?"the daily search is running":((s.log||[]).filter(l=>!/^\[|^http|^pack:|^\s/.test(l)).slice(-1)[0]||"starting"); setState("busy","Searching: "+last); $("runNow").disabled=true; $("runFull").disabled=true; $("runNow").textContent="Searching…"; }
       else { setState("ok", lr ? "Last search "+niceDate(lr.at)+" "+lr.at.slice(11,16)+": "+lr.summary.replace(/^\S+:\s*/,"") : "Ready - no search yet"); $("runNow").disabled=false; $("runFull").disabled=false; $("runNow").textContent="Search now"; }
       $("schedBtn").textContent = s.scheduled ? "Daily search: on" : "Daily search: off"; $("schedBtn").dataset.on = s.scheduled?"1":"";
@@ -478,7 +479,13 @@ dialog.send textarea{min-height:280px}
     const open=on=>{ el.classList.toggle("open",on); btn.setAttribute("aria-expanded",on?"true":"false");
       if(on){ document.querySelectorAll(".ms.open").forEach(x=>x!==el&&(x.classList.remove("open"),x.querySelector("button").setAttribute("aria-expanded","false"))); const r=el.getBoundingClientRect(); el.classList.toggle("right", r.left+230>innerWidth); } };
     btn.addEventListener("click",e=>{ e.stopPropagation(); open(!el.classList.contains("open")); });
-    el.addEventListener("keydown",e=>{ if(e.key==="Escape"&&el.classList.contains("open")){ e.stopPropagation(); open(false); btn.focus(); } });
+    el.addEventListener("keydown",e=>{
+      if(e.key==="Escape"&&el.classList.contains("open")){ e.preventDefault(); e.stopPropagation(); open(false); btn.focus(); return; }
+      if(e.key==="ArrowDown"||e.key==="ArrowUp"){ const boxes=[...menu.querySelectorAll("input")]; if(!boxes.length) return; e.preventDefault();
+        if(!el.classList.contains("open")) open(true);
+        const i=boxes.indexOf(document.activeElement); boxes[e.key==="ArrowDown"?Math.min(boxes.length-1,i+1):Math.max(0,i-1)].focus(); }
+    });
+    el.addEventListener("focusout",e=>{ if(!el.contains(e.relatedTarget)) open(false); });
     menu.addEventListener("click",e=>e.stopPropagation());
   }
   document.addEventListener("click",()=>document.querySelectorAll(".ms.open").forEach(x=>{ x.classList.remove("open"); x.querySelector("button").setAttribute("aria-expanded","false"); }));
@@ -501,7 +508,7 @@ dialog.send textarea{min-height:280px}
   let shown=[];
   const adDate = r => r.posted || r.found_date || "";
   function render(){
-    document.querySelectorAll("#fLevel button").forEach(b=>b.classList.toggle("on",b.dataset.l===filt.level));
+    document.querySelectorAll("#fLevel button").forEach(b=>{ b.classList.toggle("on",b.dataset.l===filt.level); b.setAttribute("aria-pressed",b.dataset.l===filt.level?"true":"false"); });
     const inTab=tracker.filter(r=>TAB_OF(r.status)===tab);
     const counts={todo:0,review:0,applied:0,archive:0}; tracker.forEach(r=>counts[TAB_OF(r.status)]++);
     const newToday=tracker.filter(r=>r.status==="New"&&r.found_date===today()).length;
@@ -584,8 +591,8 @@ dialog.send textarea{min-height:280px}
 
   // ---------- saving job changes (instant, with Undo)
   async function edit(r,patch,msg,undo){
-    const before={}; Object.keys(patch).forEach(k=>before[k]=r[k]??"");
-    Object.assign(r,patch); render(); if(r.url===selUrl) paintHead(r);
+    const before={}; Object.keys(patch).forEach(k=>before[k]=r[k]??""); if(!("touched" in patch)) before.touched=r.touched??"";
+    Object.assign(r,patch); if(!("touched" in patch)) r.touched=today(); render(); if(r.url===selUrl) paintHead(r);
     try{ const res=await api("/api/edits",{edits:{[r.url]:patch}}); if(res.ok===false) throw new Error(res.error||"not saved");
       if(msg) toast(msg, undo?{label:"Undo",fn:()=>edit(r,before,"Undone")}:null); return true; }
     catch(e){ Object.assign(r,before); render(); if(r.url===selUrl) paintHead(r); toast("Not saved: "+e.message); return false; }
@@ -601,11 +608,11 @@ dialog.send textarea{min-height:280px}
   $("skipAll").addEventListener("click",async()=>{
     const list=[...shown]; if(!list.length) return;
     if(!confirm(`Skip all ${list.length} jobs shown? They move to Skipped - you can undo right after.`)) return;
-    const edits={}, before={}; list.forEach(r=>{ before[r.url]=r.status; r.status="Skipped"; edits[r.url]={status:"Skipped"}; });
+    const edits={}, before={}; list.forEach(r=>{ before[r.url]={status:r.status,touched:r.touched||""}; r.status="Skipped"; r.touched=today(); edits[r.url]={status:"Skipped"}; });
     render(); const sel=tracker.find(x=>x.url===selUrl); if(sel) paintHead(sel);
     try{ await api("/api/edits",{edits});
-      toast(list.length+" jobs skipped",{label:"Undo",fn:async()=>{ const back={}; list.forEach(r=>{ r.status=before[r.url]; back[r.url]={status:before[r.url]}; }); render(); if(sel) paintHead(sel); try{ await api("/api/edits",{edits:back}); toast("Undone"); }catch(e){ toast("Not undone: "+e.message); } }}); }
-    catch(e){ list.forEach(r=>r.status=before[r.url]); render(); toast("Not saved: "+e.message); }
+      toast(list.length+" jobs skipped",{label:"Undo",fn:async()=>{ const back={}; list.forEach(r=>{ Object.assign(r,before[r.url]); back[r.url]={...before[r.url]}; }); render(); if(sel) paintHead(sel); try{ await api("/api/edits",{edits:back}); toast("Undone"); }catch(e){ toast("Not undone: "+e.message); } }}); }
+    catch(e){ list.forEach(r=>Object.assign(r,before[r.url])); render(); toast("Not saved: "+e.message); }
   });
 
   // ---------- detail sheet
@@ -728,7 +735,7 @@ dialog.send textarea{min-height:280px}
     dlg.showModal(); $("sTo").focus();
     $("sSend").addEventListener("click",async()=>{ const b=$("sSend"); b.disabled=true; b.textContent="Sending…";
       try{ const res=await api("/api/send",{url:r.url,to:$("sTo").value.trim(),subject:$("sSub").value.trim(),body:$("sBody").value});
-        if(res.ok){ dlg.close(); Object.assign(r,{status:"Applied",applied_date:r.applied_date||today()}); render(); paintHead(r); toast("Application sent to "+res.to); } else { toast(res.error||"Not sent"); b.disabled=false; b.textContent="Send application"; } }
+        if(res.ok){ dlg.close(); Object.assign(r,{status:"Applied",applied_date:r.applied_date||today()}); render(); paintHead(r); toast("Application sent to "+res.to+(res.warning?" - but "+res.warning:"")); } else { toast(res.error||"Not sent"); b.disabled=false; b.textContent="Send application"; } }
       catch(e){ toast("Not sent: "+e.message); b.disabled=false; b.textContent="Send application"; } });
   }
 
@@ -812,12 +819,12 @@ dialog.send textarea{min-height:280px}
     const box=$("keysBox"); box.innerHTML="";
     JOOBLE.forEach(([cc,label])=>{
       const f=document.createElement("div"); f.className="field";
-      f.innerHTML=`<label for="jk-${cc}">Jooble ${esc(label)} <span class="faint">${keysSet[cc]?"(saved)":""}</span></label><input type="text" id="jk-${cc}" placeholder="${keysSet[cc]?"saved - paste a new key to replace it":"key from "+(cc==="us"?"":cc+".")+"jooble.org"}" autocomplete="off" spellcheck="false">`;
+      f.innerHTML=`<label for="jk-${cc}">Jooble ${esc(label)} <span class="faint">${keysSet[cc]?"(saved)":""}</span></label><input type="text" id="jk-${cc}" placeholder="${keysSet[cc]?"saved - paste a new key to replace it, or type and clear to remove it":"key from "+(cc==="us"?"":cc+".")+"jooble.org"}" autocomplete="off" spellcheck="false">`;
       f.querySelector("input").addEventListener("input",e=>{ keyEdits[cc]=e.target.value.trim(); keysDirty=true; $("saveKeys").disabled=false; });
       box.appendChild(f);
     });
   }
-  $("saveKeys").addEventListener("click",async()=>{ const changed=Object.fromEntries(Object.entries(keyEdits).filter(([,v])=>v));
+  $("saveKeys").addEventListener("click",async()=>{ const changed={...keyEdits};      // a box you emptied removes that key
     try{ const r=await api("/api/keys",{jooble:changed}); if(r.ok===false) throw new Error(r.error); Object.keys(keyEdits).forEach(k=>delete keyEdits[k]); keysDirty=false; $("saveKeys").disabled=true;
       keysSet=(await api("/api/keys")).jooble||{}; renderKeys(); toast("Keys saved"); }catch(e){ toast("Not saved: "+e.message); } });
 

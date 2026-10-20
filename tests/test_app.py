@@ -176,7 +176,7 @@ class AppAPI(unittest.TestCase):
             import csv, io
             rows = list(csv.DictReader(io.StringIO(json.loads(body)["text"])))
             self.assertEqual((rows[0]["title"], rows[0]["found_date"]), ("Ingénieur – civil", "2026-10-20"))
-            path.write_text("this is not a job list", encoding="utf-8")
+            path.write_text("this is not a job list\n", encoding="utf-8")
             st, _, body = self.req("GET", "/api/file?path=tracker.csv")
             self.assertEqual(st, 500)
             self.assertIn("can't be read", json.loads(body)["error"])

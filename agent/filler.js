@@ -78,7 +78,7 @@
     [/\bbased in\b|\bcurrently (reside|living|located)\b|\blocal candidate\b/i, inGCC === null ? null : (inGCC && /bahrain/i.test(JOB.location || "") ? "Yes" : "No")],
   ];
   // Questions only YOU can answer (legal declarations, consent, history, diversity) are never filled.
-  const PERSONAL = /\bconvict|\bcriminal|\bfelony|\boffen[cs]e|\bdisabilit|\bveteran|\bgender|\bsex\b|\bethnic|\brace\b|\breligio|\bmarital|\bpregnan|\bdate of birth|\bdob\b|\bage\b|\brelative|\bfamily member|\bconflict of interest|\bgovernment official|\bpreviously (worked|applied|employed)|\bformer employee|\bnon-?compete|\bemployment agreement|\brestrictive|\bagree\b|\bconsent|\backnowledge|\bcertify|\bdeclar|\bprivacy|\bterms\b|\bsignature|\bsign here|\bpassword|\bpassport|\bnational id|\bcpr\b|\biqama|\bssn\b|\bsocial security|\bbank|\biban|\bcard number/i;
+  const PERSONAL = /\bconvict|\bcriminal|\bfelony|\boffen[cs]e|\bdisabilit|\bveteran|\bgender|\bsex\b|\bethnic|\brace\b|\breligio|\bmarital|\bpregnan|\bdate of birth|\bdob\b|\bage\b|\brelative|\bfamily member|\bconflict of interest|\bgovernment official|\bpreviously (worked|applied|employed)|\bformer employee|\bnon-?compete|\bemployment agreement|\brestrictive|\bagree\b|\bconsent|\backnowledge|\bcertify|\bdeclar|\bprivacy|\bterms\b|\bsignature|\bsign here|\bpassword|\bpassport|\bnational id|\bcpr\b|\biqama|\bssn\b|\bsocial security|\bbank|\biban|\bcard number|\baccept|\bauthori[sz]e (us|the|our|them|[a-z]+ to)|\bpermission|\bopt[- ]?in|\bnewsletter|\bmarketing|\bpromotion|\bsubscribe|\bshare (your|my|the|these) (details|data|information|cv|profile)|\bthird[- ]part|\bdata (retention|processing|protection|sharing|privacy)|\bgdpr|\bbackground (check|screening|verification)|\breference check|\bcontact (your|my) (referee|employer|previous|current)|\bemergency|\breferee|\bnext of kin|\bspouse|\bfather|\bmother|\bguardian|\bcard ?holder|\bcvv|\bexpiry|\bpasscode|\bsecurity code|\bpin\b|\botp\b|\bverification code/i;
 
   function answerFor(d) {
     for (const [rx, v] of answersRx) if (rx.test(d)) return v;
@@ -100,9 +100,32 @@
       const s = getComputedStyle(n);
       if (s.display === "none" || s.visibility === "hidden" || +s.opacity < 0.15) return false;
       if (n.getAttribute("aria-hidden") === "true" || n.hasAttribute("inert")) return false;
-      if (/inset\(\s*(50|100)%/.test(s.clipPath) || /rect\(\s*0(px)?,?\s*0(px)?,?\s*0(px)?,?\s*0(px)?\s*\)/.test(s.clip)) return false;
+      if (/inset\(\s*(4\d(\.\d+)?|50|100)%|circle\(\s*0|ellipse\(\s*0/.test(s.clipPath) || /rect\(\s*0(px)?,?\s*0(px)?,?\s*0(px)?,?\s*0(px)?\s*\)/.test(s.clip)) return false;
+      if (/opacity\(\s*0(\.0*)?(%|\s*\))/.test(s.filter) || /scale\(\s*0(\.0*)?\s*[,)]/.test(s.transform)) return false;
+      // a scrolling/clipping box the field lies entirely outside of
+      if (n !== el && /hidden|clip|auto|scroll/.test(s.overflow + s.overflowX + s.overflowY)) {
+        const b = n.getBoundingClientRect();
+        if (r.right <= b.left || r.left >= b.right || r.bottom <= b.top || r.top >= b.bottom) return false;
+      }
     }
-    return AUTO || uncovered(el, r);
+    if (el.tagName !== "SELECT" && el.type !== "radio" && el.type !== "checkbox") {      // text you could not see you type
+      const s = getComputedStyle(el);
+      if (/rgba\([^)]*,\s*0\)|transparent/.test(s.color) && /rgba\([^)]*,\s*0\)|transparent/.test(s.backgroundColor)) return false;
+    }
+    const inView = r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth;
+    if (inView && !uncovered(el, r)) return false;                 // something is laid over it - on every site
+    if (!AUTO && !seenByBrowser(el)) return false;                 // unknown sites: Chrome itself must report it visible
+    return AUTO || inView;
+  }
+  // Chrome's own visibility check (IntersectionObserver v2): false for anything covered, faded, filtered or clipped -
+  // including covers that let clicks through (pointer-events:none), which elementFromPoint can't see.
+  const SEEN = new WeakMap();
+  let seenIO = null;
+  try { seenIO = new IntersectionObserver(es => { for (const e of es) SEEN.set(e.target, e.isVisible === true); }, { trackVisibility: true, delay: 100 }); } catch (e) { seenIO = null; }
+  function seenByBrowser(el) {
+    if (!seenIO) return false;
+    if (!SEEN.has(el)) { SEEN.set(el, false); seenIO.observe(el); setTimeout(run, 400); return false; }
+    return SEEN.get(el);
   }
   // Outside known job sites a field must be in view and not covered by another element (a page could hide a field
   // under a picture to collect your details without you seeing them). Fields further down fill as you scroll to them.
@@ -151,7 +174,7 @@
     SET.set(el, { v: value, n: (SET.get(el) || { n: 0 }).n + 1 });
     const proto = el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
     const setter = Object.getOwnPropertyDescriptor(proto, "value");
-    el.focus();
+    el.focus({ preventScroll: true });
     if (setter && setter.set) setter.set.call(el, value); else el.value = value;
     for (const t of ["input", "change", "keyup", "blur"]) el.dispatchEvent(new Event(t, { bubbles: true }));
     DONE.add(el);
@@ -162,7 +185,7 @@
     let o = opts.find(o => o.text.trim().toLowerCase() === w) || opts.find(o => o.text.trim().toLowerCase().startsWith(w)) || opts.find(o => o.text.toLowerCase().includes(w));
     if (!o && /^\+?\d+$/.test(w)) o = opts.find(o => o.text.replace(/\s/g, "").includes(w.replace("+", "")) || o.value.includes(w.replace("+", "")));
     if (!o) return false;
-    sel.focus(); sel.value = o.value;
+    sel.focus({ preventScroll: true }); sel.value = o.value;
     for (const t of ["input", "change", "blur"]) sel.dispatchEvent(new Event(t, { bubbles: true }));
     DONE.add(sel);
     return true;
@@ -331,7 +354,19 @@
     },
     option() { return OPT; },
     arm() { ST.armed = true; run(); },          // the app's own "fill now" (the page cannot call this)
+    guard() { GUARD_UNTIL = Date.now() + 1500; return true; },   // the app is about to click a dropdown option
   };
+  // While the app clicks a dropdown option, no button, link or form submission may happen: if the page slides a
+  // Submit button under the pointer, the click is cancelled.
+  let GUARD_UNTIL = 0;
+  const blockIfGuarded = (e) => {
+    if (Date.now() > GUARD_UNTIL) return;
+    const t = e.target instanceof Element ? e.target : null;
+    if (e.type === "submit" || (t && t.closest('button,a,input[type=submit],input[type=image],[role=button],[role=link]'))) {
+      e.preventDefault(); e.stopImmediatePropagation(); say("a click landed on a button - cancelled; nothing was submitted");
+    }
+  };
+  for (const t of ["click", "submit", "auxclick"]) window.addEventListener(t, blockIfGuarded, true);
   const mo = new MutationObserver(() => { clearTimeout(ST._t); ST._t = setTimeout(run, 700); });
   const start = () => {
     bar_(); setTimeout(run, 1200); setTimeout(run, 4000); mo.observe(document.documentElement, { childList: true, subtree: true });

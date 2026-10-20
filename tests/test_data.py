@@ -212,6 +212,36 @@ class JobList(unittest.TestCase):
         tracker.save(self.path, rows, dropped=[li])                       # untouched: it stays merged away
         self.assertNotIn(li, tracker.load(self.path))
 
+    def test_an_emptied_or_cut_off_list_is_restored_from_the_last_good_copy(self):
+        rows = {f"https://x/{i}": row(f"https://x/{i}", user_notes="mine" if i == 3 else "") for i in range(60)}
+        tracker.write(self.path, rows)
+        tracker.write(self.path, rows)                                   # the second write keeps the first as the backup
+        self.path.write_bytes(b"")                                       # power cut / sync tool
+        with tracker.locked(self.path):
+            back = tracker.load_current(self.path)
+        self.assertEqual(len(back), 60)
+        self.assertEqual(back["https://x/3"]["user_notes"], "mine")
+        raw = self.path.read_bytes()
+        self.path.write_bytes(raw[: len(raw) // 3])                      # cut off mid-line
+        with tracker.locked(self.path):
+            self.assertEqual(len(tracker.load_current(self.path)), 60)
+        self.assertTrue(list(self.path.parent.glob("tracker.damaged-*.csv")))   # the damaged file is kept aside
+
+    def test_excel_details_are_understood(self):
+        text = "url,status,user_notes,title\r\nhttps://a,applied,x,T\r\nhttps://b,New,first,T\r\nhttps://b,New,second,T\r\n"
+        self.path.write_text(text, encoding="utf-8")
+        rows = tracker.load(self.path)
+        self.assertEqual(rows["https://a"]["status"], "Applied")
+        self.assertIn("first", rows["https://b"]["user_notes"]); self.assertIn("second", rows["https://b"]["user_notes"])
+        r = row("https://c", user_notes="'+973 phone")
+        tracker.write(self.path, {"https://c": r})
+        self.assertEqual(tracker.load(self.path)["https://c"]["user_notes"], "'+973 phone")
+
+    def test_columns_from_a_newer_version_are_kept(self):
+        r = row("https://n"); r["future_field"] = "keep me"
+        tracker.write(self.path, {"https://n": r})
+        self.assertEqual(tracker.load(self.path)["https://n"]["future_field"], "keep me")
+
     def test_rules_update_does_not_count_as_seen(self):
         old = (date.today() - timedelta(days=50)).isoformat()
         ad = "Site engineer for civil works, roads and drainage. 3-5 years experience. " * 6

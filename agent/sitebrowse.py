@@ -110,7 +110,7 @@ CHALLENGE_JS = r"""(() => /just a moment|security check|attention required|verif
 SITES = {
     "indeed": {"name": "Indeed", "js": INDEED_JS, "detail": False, "group": True, "newest_first": True,  # human check on job pages
                "where": lambda c: INDEED_HOST.get(c),
-               "url": lambda w, q, p: f"https://{w}/jobs?q={quote_plus(q)}&sort=date&fromage={window(21)}" + (f"&start={p * 10}" if p else "")},
+               "url": lambda w, q, p: f"https://{w}/jobs?q={quote_plus(q)}&sort=date&fromage={window(21, 'browser_sites')}" + (f"&start={p * 10}" if p else "")},
     "bayt": {"name": "Bayt", "js": BAYT_JS, "detail": True, "where": lambda c: GULF_SLUG.get(c),
              "url": lambda w, q, p: f"https://www.bayt.com/en/{w}/jobs/{_slug(q)}-jobs/" + (f"?page={p + 1}" if p else "")},
     "naukrigulf": {"name": "NaukriGulf", "js": NAUKRI_JS, "detail": True, "newest_first": True, "where": lambda c: GULF_SLUG.get(c),
@@ -204,15 +204,15 @@ class Session:
             raise RuntimeError("the search browser did not start (is it already open with the same profile?)")
 
     def _kill(self):
-        if self.proc is not None and self.proc.poll() is None:
-            try:
-                self.proc.terminate()
-                self.proc.wait(timeout=5)
-            except Exception:
+        from .browser import kill_tree
+        if self.proc is not None:
+            if self.proc.poll() is None:
                 try:
-                    self.proc.kill()
+                    self.proc.terminate()
+                    self.proc.wait(timeout=5)
                 except Exception:
                     pass
+            kill_tree(self.proc)                     # helper processes too
         self.proc, self.port = None, 0
 
     def drop_tab(self):

@@ -41,9 +41,12 @@ def prune(keep_urls, recent_days: int = 30) -> int:
     if not ROOT.exists():
         return 0
     keep = {key(u) for u in keep_urls}
+    files = list(ROOT.glob("*.json"))
+    if len(files) > 100 and len(keep) < 0.3 * len(files):
+        return 0                        # the list looks lost or damaged: keep every saved ad until it is back
     cut = time.time() - recent_days * 86400
     n = 0
-    for f in ROOT.glob("*.json"):
+    for f in files:
         if f.stem in keep:
             continue
         try:

@@ -178,6 +178,20 @@ def find_browser() -> str | None:
     return None
 
 
+def kill_tree(proc) -> None:
+    """End a browser we started and every process it started (Edge/Chrome leave helper processes behind otherwise)."""
+    if proc is None:
+        return
+    try:
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True, timeout=20,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        elif proc.poll() is None:
+            proc.kill()
+    except Exception:
+        pass
+
+
 def _free_port() -> int:
     s = socket.socket()
     s.bind(("127.0.0.1", 0))
@@ -232,11 +246,12 @@ def close_browser():
         except Exception:
             pass
     proc = _STATE["proc"]
-    if proc is not None and proc.poll() is None:
+    if proc is not None:
         try:
-            proc.terminate()
+            proc.wait(timeout=5)
         except Exception:
             pass
+        kill_tree(proc)
 
 
 def open_tab(port: int) -> dict:
@@ -363,13 +378,26 @@ class ApplySession:
                     if st.get("submitted") and not self.done:
                         self.done = True
                         self.log.append("submitted")
-                        if self.on_submitted:
-                            self.on_submitted()
+                        self.unmarked = bool(self.on_submitted)
+                if getattr(self, "unmarked", False):            # keep trying while the list is busy / open in Excel
+                    try:
+                        self.on_submitted()
+                        self.unmarked = False
+                        self.log.append("marked as Applied in your list")
+                    except Exception as e:  # noqa
+                        if not getattr(self, "_warned", False):
+                            self.log.append(f"couldn't mark it Applied yet ({type(e).__name__}) - will keep trying")
+                            self._warned = True
             except (ConnectionError, OSError):
                 break
             except Exception as e:
                 self.log.append(f"note: {str(e)[:80]}")
             time.sleep(1.5)
+        if getattr(self, "unmarked", False):
+            try:
+                self.on_submitted(); self.unmarked = False
+            except Exception:  # noqa
+                self.log.append("not marked Applied - the job list was busy; mark it yourself")
         self.stop = True
         if not self.done:
             self.log.append("window closed")
@@ -405,12 +433,20 @@ class ApplySession:
         if self._on(obj, "function(){return !!this.closest('button,a,[type=submit],[role=button],[role=link]')}"):
             self.log.append("skipped a click: that element is a button or link")      # the helper never presses buttons
             return False
-        if not self._on(obj, "function(x,y){const h=document.elementFromPoint(x,y);if(!h)return false;"
-                             "const box=this.closest('[class*=control],[role=combobox],[class*=select]')||this;"
-                             "return h===this||this.contains(h)||h.contains(this)&&h.getBoundingClientRect().width<=box.getBoundingClientRect().width*1.5||box.contains(h);}", x, y):
+        check = ("function(x,y){const h=document.elementFromPoint(x,y);if(!h)return false;"
+                 "if(h.closest('button,a,[type=submit],[type=image],[role=button],[role=link]'))return false;"   # never a button under the pointer
+                 "const box=this.closest('[class*=control],[role=combobox],[class*=select]')||this;"
+                 "return h===this||this.contains(h)||h.contains(this)&&h.getBoundingClientRect().width<=box.getBoundingClientRect().width*1.5||box.contains(h);}")
+        if not self._on(obj, check, x, y):
             self.log.append("skipped a click: something was covering the field")
             return False
-        for t in ("mouseMoved", "mousePressed", "mouseReleased"):
+        self.tab.call("Input.dispatchMouseEvent", type="mouseMoved", x=x, y=y, button="none")
+        time.sleep(0.15)
+        if not self._on(obj, check, x, y):                  # the page moved something under the pointer: no click
+            self.log.append("skipped a click: the page changed under the pointer")
+            return False
+        self._eval("__ja.guard()")                              # buttons/links/submits are cancelled for the next moment
+        for t in ("mousePressed", "mouseReleased"):
             self.tab.call("Input.dispatchMouseEvent", type=t, x=x, y=y, button="left", clickCount=1)
         return True
 

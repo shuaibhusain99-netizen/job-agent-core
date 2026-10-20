@@ -44,9 +44,15 @@ PAGE_WRITES = {"profile.json", "sources.json"}
 JOOBLE_SITES = ("us", "sa", "ae", "qa", "kw", "om", "bh", "ca", "au")
 
 
-def ensure_data():
-    from agent import tracker
+UPDATING = {"on": False}            # the list is being re-judged after a program update (the page says so)
+
+
+def ensure_data(background: bool = False):
+    """Data folder ready. The slow part after a program update (re-judging the whole list) runs in the background when
+    `background` is set, so the app's page opens at once."""
+    from agent import tracker, ai
     DATA.mkdir(exist_ok=True)
+    ai.USAGE = DATA / "ai_usage.json"
     (DATA / "applications").mkdir(exist_ok=True)
     for name in ("profile.json", "keys.json", "sources.json"):
         if not (DATA / name).exists():
@@ -54,9 +60,11 @@ def ensure_data():
     new_rules = upgrade_config()
     if not (DATA / "tracker.csv").exists():
         tracker.write(DATA / "tracker.csv", {})
-    else:
+        return
+
+    def update():
         try:                                         # one-time re-tag of rows from older versions (display tags only)
-            with tracker.locked(DATA / "tracker.csv"):
+            with tracker.locked(DATA / "tracker.csv", wait=300):
                 rows = tracker.load_current(DATA / "tracker.csv")     # also adds results kept aside while Excel had it open
                 profile = json.loads((DATA / "profile.json").read_text(encoding="utf-8"))
                 changed = tracker.retag_old_rows(rows, profile)
@@ -66,6 +74,13 @@ def ensure_data():
                     tracker.write(DATA / "tracker.csv", rows)
         except Exception as e:  # noqa
             print(f"job list update skipped: {e}")
+        finally:
+            UPDATING["on"] = False
+    if new_rules and background:
+        UPDATING["on"] = True
+        threading.Thread(target=update, daemon=True).start()
+    else:
+        update()
 
 
 def rejudge_after_rules_update(rows: dict, profile: dict) -> int:
@@ -277,25 +292,37 @@ def _task_xml(command: str, args: str, hour: int) -> str:
 _SCHED = {"at": 0.0, "on": False}
 
 
+def _run_quiet(args: list[str], timeout: int = 30):
+    """Run a Windows tool without a console window; its output is read in whatever language/code page Windows uses."""
+    r = subprocess.run(args, capture_output=True, timeout=timeout, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    def dec(b: bytes) -> str:
+        for enc in ("utf-8", "mbcs" if os.name == "nt" else "latin-1", "cp850"):
+            try:
+                return b.decode(enc)
+            except (UnicodeDecodeError, LookupError):
+                continue
+        return b.decode("latin-1", "replace")
+    r.stdout, r.stderr = dec(r.stdout or b""), dec(r.stderr or b"")
+    return r
+
+
 def schedule(enable: bool, hour: int = 7) -> str:
     if os.name != "nt":
         return "Scheduling is available on Windows only."
-    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     _SCHED["at"] = 0.0
     if not enable:
-        r = subprocess.run(["schtasks", "/Delete", "/F", "/TN", TASK], capture_output=True, text=True, creationflags=flags)
+        r = _run_quiet(["schtasks", "/Delete", "/F", "/TN", TASK])
         return (r.stdout or r.stderr).strip()
     command, args = (sys.executable, "--run") if FROZEN else (sys.executable, f'"{Path(__file__).resolve()}" --run')
     xml = DATA / "schedule-task.xml"
     try:
         xml.write_text(_task_xml(command, args, hour), encoding="utf-16")
-        r = subprocess.run(["schtasks", "/Create", "/F", "/TN", TASK, "/XML", str(xml)], capture_output=True, text=True, creationflags=flags)
+        r = _run_quiet(["schtasks", "/Create", "/F", "/TN", TASK, "/XML", str(xml)])
     finally:
         xml.unlink(missing_ok=True)
     if r.returncode != 0:                       # older Windows: the plain daily task (runs only if the PC is on at that time)
         tr = f'"{command}" {args}'
-        r = subprocess.run(["schtasks", "/Create", "/F", "/SC", "DAILY", "/TN", TASK, "/ST", f"{hour:02d}:00", "/TR", tr],
-                           capture_output=True, text=True, creationflags=flags)
+        r = _run_quiet(["schtasks", "/Create", "/F", "/SC", "DAILY", "/TN", TASK, "/ST", f"{hour:02d}:00", "/TR", tr])
     if r.returncode == 0:
         try:
             (DATA / "schedule.json").write_text(json.dumps({"hour": hour}), encoding="utf-8")
@@ -309,8 +336,12 @@ def schedule_status() -> bool:
     if os.name != "nt":
         return False
     if time.time() - _SCHED["at"] > 60:
-        r = subprocess.run(["schtasks", "/Query", "/TN", TASK], capture_output=True, text=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        _SCHED.update(at=time.time(), on=r.returncode == 0)
+        try:
+            r = _run_quiet(["schtasks", "/Query", "/TN", TASK])
+            on = r.returncode == 0
+        except Exception:  # noqa
+            on = _SCHED["on"]
+        _SCHED.update(at=time.time(), on=on)
     return _SCHED["on"]
 
 
@@ -474,16 +505,26 @@ def send_application(url: str, to: str, subject: str, body: str) -> dict:
     stamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
     safe = "".join(ch if ch.isalnum() else "-" for ch in subject)[:60].strip("-")
     (sent / f"{stamp}_{safe}.eml").write_bytes(bytes(msg))     # your own copy; sent/ is never served to the page
+    # the e-mail is out: from here on nothing may turn this into "not sent"
     from agent import tracker
-    with tracker.locked(DATA / "tracker.csv"):
-        rows = tracker_rows_current()
-        for r in rows:
-            if r.get("url") == url:
-                r["status"] = "Applied"; r["applied_date"] = r.get("applied_date") or datetime.now().date().isoformat()
-                r["touched"] = datetime.now().date().isoformat()
-                r["user_notes"] = (r.get("user_notes", "") + f" | e-mailed {msg['To']} {stamp[:10]}").strip(" |")
-        tracker_write(rows, locked=True)
-    return {"ok": True, "to": msg["To"], "saved": f"sent/{stamp}_{safe}.eml"}
+    warn = ""
+    try:
+        with tracker.locked(DATA / "tracker.csv"):
+            rows = tracker_rows_current()
+            hit = False
+            for r in rows:
+                if r.get("url") == url:
+                    hit = True
+                    r["status"] = "Applied"; r["applied_date"] = r.get("applied_date") or datetime.now().date().isoformat()
+                    r["touched"] = datetime.now().date().isoformat()
+                    r["user_notes"] = (r.get("user_notes", "") + f" | e-mailed {msg['To']} {stamp[:10]}").strip(" |")
+            if hit:
+                tracker_write(rows, locked=True)
+            else:
+                warn = "this job is no longer in your list, so it couldn't be marked Applied"
+    except Exception as e:  # noqa - e.g. the list is open in Excel
+        warn = f"the job list couldn't be updated ({type(e).__name__}) - mark it Applied yourself"
+    return {"ok": True, "to": msg["To"], "saved": f"sent/{stamp}_{safe}.eml", "warning": warn}
 
 
 # ----------------------------------------------------------------------------- apply on site (browser helper)
@@ -548,12 +589,20 @@ def apply_edits(edits: dict) -> dict:
             e = edits.get(r.get("url"))
             if not isinstance(e, dict):
                 continue
+            changed = False
             for k, v in e.items():
                 if k in EDITABLE and isinstance(v, str) and len(v) <= 2000 and (k != "status" or v in STATUSES):
                     if r.get(k, "") != v:
                         r[k] = v
-                        r["touched"] = today
+                        changed = True
                         n += 1
+            t = e.get("touched")
+            if isinstance(t, str) and (t == "" or re.fullmatch(r"\d{4}-\d{2}-\d{2}", t)):
+                if r.get("touched", "") != t:                  # Undo puts back exactly what was there - the agent may
+                    r["touched"] = t                           # judge the row again as before
+                    n += 1
+            elif changed:
+                r["touched"] = today
         if n:
             tracker_write(rows, locked=True)
         missing = set(edits) - {r.get("url") for r in rows}
@@ -702,7 +751,7 @@ class Handler(BaseHTTPRequestHandler):
                 runs = [l.split("\t", 1) for l in (DATA / "runs.log").read_text(encoding="utf-8").splitlines()[-8:] if "\t" in l]
             lock = DATA / RUN_LOCK
             elsewhere = not STATE["running"] and lock.exists() and time.time() - lock.stat().st_mtime < 3 * 3600
-            return self._json({"running": STATE["running"] or elsewhere, "elsewhere": elsewhere,
+            return self._json({"running": STATE["running"] or elsewhere, "elsewhere": elsewhere, "updating": UPDATING["on"],
                                "log": STATE["log"][-6:] if not elsewhere else ["The daily search is running in the background"],
                                "summary": STATE["summary"], "started": STATE["started"],
                                "runs": [{"at": a, "summary": b} for a, b in reversed(runs)], "scheduled": schedule_status(),
@@ -986,8 +1035,7 @@ def already_running() -> str:
 def _listening_pids(port: int) -> set[int]:
     """Processes listening on a local port (Windows)."""
     try:
-        out = subprocess.run(["netstat", "-ano", "-p", "TCP"], capture_output=True, text=True, timeout=20,
-                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
+        out = _run_quiet(["netstat", "-ano", "-p", "TCP"], timeout=20).stdout
     except Exception:
         return set()
     pids = set()
@@ -1041,7 +1089,7 @@ if __name__ == "__main__":
     ap.add_argument("--no-browser", action="store_true")
     a = ap.parse_args()
     try:
-        ensure_data()
+        ensure_data(background=not a.run)
     except Exception as e:  # noqa - e.g. the exe sits in a folder that can't be written (Program Files, a CD, a locked share)
         alert(f"Job Agent can't create its data folder next to the program:\n{DATA}\n\n{type(e).__name__}: {e}\n\n"
               "Move JobAgent.exe to a folder you can write to (for example Documents\\JobAgent) and start it again.")

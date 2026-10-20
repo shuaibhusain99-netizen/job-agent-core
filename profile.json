@@ -178,7 +178,7 @@
     "director": -60,
     "head of": -60,
     "chief": -60,
-    "specialist": -5,
+    "specialist": -15,
     "electrical": -50,
     "mechanical": -50,
     "mep": -40,
@@ -290,7 +290,33 @@
     "oracle dba": -80,
     "it support": -70,
     "helpdesk": -80,
-    "help desk": -80
+    "help desk": -80,
+    "fit-out": -15,
+    "fitout": -15,
+    "fit out": -15,
+    "joinery": -40,
+    "interior": -20,
+    "aluminium": -40,
+    "aluminum": -40,
+    "glass": -40,
+    "glazing": -40,
+    "painting": -40,
+    "epoxy": -40,
+    "flooring": -30,
+    "landscape": -10,
+    "landscaping": -10,
+    "solar": -15,
+    "hrsg": -50,
+    "boiler": -50,
+    "turbine": -50,
+    "sre": -80,
+    "aiops": -80,
+    "platform engineer": -80,
+    "compute": -80,
+    "naval": -50,
+    "freight": -40,
+    "dispatch": -40,
+    "expert": -20
   },
   "keyword_points": {
     "water network": 12,
@@ -379,14 +405,15 @@
     "\\b(?:saudi|uae|emirati|qatari|kuwaiti|omani)\\s+(?:nationals?|citizens?)\\s+only\\b",
     "\\bonly\\s+(?:saudi|uae|emirati|qatari|kuwaiti|omani)\\s+(?:nationals?|citizens?)\\b(?![^.;\\n]{0,20}\\b(?:or|and|/)\\s*gcc)",
     "\\bfor\\s+(?:saudis|emiratis|qataris|kuwaitis|omanis)\\s+only\\b",
-    "\\b(?:bachelor|degree)\\s+in\\s+(?:electrical|mechanical|chemical|computer|petroleum)\\s+engineering\\b(?![^.;\\n]{0,40}\\bcivil\\b)",
+    "\\b(?:bachelor(?:'s|s)?|b\\.?\\s?sc\\.?|b\\.?\\s?e\\.?|b\\.?\\s?tech\\.?|degree|diploma)\\s+(?:degree\\s+)?(?:or\\s+diploma\\s+)?in\\s+(?:an?\\s+)?(?:electrical|mechanical|chemical|computer|petroleum|instrumentation|electronics?)\\b(?![^.;\\n]{0,60}\\bcivil\\b)",
     "\\b(?:this|the)\\s+(?:vacancy|position|job|role|posting)\\s+(?:is|has)\\s+(?:now\\s+)?(?:been\\s+)?(?:closed|filled|expired)\\b",
     "\\bno longer accepting applications\\b|\\bapplications? (?:are|is|have) (?:now )?closed\\b",
     "\\b(?:must be|open to|only for|for|exclusively for|restricted to|limited to)\\s+(?:an?\\s+)?(?:saudi|uae|emirati|qatari|kuwaiti|omani)\\s+(?:nationals?|citizens?|candidates?)\\b(?![^.;\\n]{0,25}\\b(?:or|and|/)\\s*(?:other\\s+)?gcc)",
-    "\\b(?:emiratis|saudis|qataris|kuwaitis|omanis)\\s+only\\b",
+    "\\b(?:emiratis?|saudis?|qataris?|kuwaitis?|omanis?)(?:\\s+(?:candidates?|applicants?|nationals?|citizens?))?\\s+only\\b",
     "\\b(?:this|the)\\s+(?:is\\s+an?\\s+)?(?:role|position|job|vacancy|opportunity)?\\s*(?:is\\s+)?(?:an?\\s+)?(?:emiratisation|emiratization|saudi[sz]ation|omani[sz]ation|qatari[sz]ation|kuwaiti[sz]ation)\\b|\\b(?:emiratisation|emiratization|saudi[sz]ation|omani[sz]ation|qatari[sz]ation|kuwaiti[sz]ation)\\s+(?:role|position|job|vacancy|opportunity|program(?:me)?)\\b",
     "\\blooking for (?:an?\\s+)?(?:emirati|saudi|qatari|kuwaiti|omani)\\s+(?:national\\s+)?(?:graduate|engineer|candidate|professional|talent)",
-    "\\b(?:female|women|ladies)\\s+(?:candidates?\\s+|applicants?\\s+)?only\\b|\\bonly\\s+(?:female|women|ladies)\\b"
+    "\\b(?:female|women|ladies)\\s+(?:candidates?\\s+|applicants?\\s+)?only\\b|\\bonly\\s+(?:female|women|ladies)\\b",
+    "(?:^|\\n|\\.\\s+)\\s*(?:qualifications?\\s*:?\\s*)?(?:uae|emirati|saudi|qatari|kuwaiti|omani)\\s+nationals?\\s*(?:only)?\\s*(?:\\.|\\n|$)"
   ],
   "experience_fit": {
     "_comment": "Experience ranges that match 4 years earn a bonus; others are penalised in score.py",
@@ -562,7 +589,18 @@
         "hse advisor",
         "safety advisor",
         "ehs officer",
-        "hse inspector"
+        "hse inspector",
+        "whse advisor",
+        "whs advisor",
+        "whs officer",
+        "qhse officer",
+        "qhse engineer",
+        "qhse advisor",
+        "ehs advisor",
+        "ehs engineer",
+        "safety inspector",
+        "safety coordinator",
+        "hse technician"
       ],
       "keyword_points": {
         "nebosh": 15,
@@ -1018,7 +1056,8 @@
     "^(?!.*\\b(?:gcc|bahraini?)\\b).*\\b(?:saudi|kuwaiti|qatari|emirati|omani)\\s+(?:civil|site|project|graduate|junior|fresh|trainee|engineer|inspector|surveyor|officer|technician|supervisor|coordinator|national)",
     "^(?!.*\\b(?:gcc|bahraini?)\\b).*\\(\\s*nationals?\\s*\\)",
     "\\b(?:omani[sz]ation|qatari[sz]ation|kuwaiti[sz]ation|emirati[sz]ation)\\b",
-    "\\b(?:female|ladies|women)\\b"
+    "\\b(?:female|ladies|women)\\b(?!'s)",
+    "إماراتي|سعودي|قطري|كويتي|عماني|مواطن|خلاصة القيد"
   ],
   "title_penalty_exempt": {
     "_comment": "A penalty word is ignored when the title also matches this (e.g. 'Wet Utilities Network Engineer' is not IT).",
@@ -1047,7 +1086,11 @@
     "tunnel": "\\bcivil\\b|\\bstructural\\b|\\bsite\\b",
     "offshore": "\\bcivil\\b|\\bstructural\\b|\\bsite\\b",
     "piping": "\\bcivil\\b|\\bstructural\\b",
-    "geotechnical": "\\bcivil\\b|\\bstructural\\b|\\bsite\\b"
+    "geotechnical": "\\bcivil\\b|\\bstructural\\b|\\bsite\\b",
+    "fit-out": "\\bcivil\\b",
+    "fitout": "\\bcivil\\b",
+    "fit out": "\\bcivil\\b",
+    "solar": "\\bcivil\\b|\\bsite\\b"
   },
   "work_rights": {
     "_comment": "Outside the GCC: 'reject' = you can't legally take the job without citizenship/PR/clearance; 'penalty' = boilerplate that usually means no sponsorship; visa_needed = the job goes to Review unless the ad shows the employer sponsors visas (sponsor_signals) - set it to false if you get a work permit or PR there.",
@@ -1097,20 +1140,21 @@
         "\\btemporary foreign workers?\\b",
         "\\b(?:international|overseas) applicants (?:are )?(?:welcome|encouraged)\\b",
         "\\bwork permit (?:sponsorship|support)\\b",
-        "\\bglobal talent (?:visa|stream|program)\\b"
+        "\\bglobal talent (?:visa|stream|program)\\b",
+        "\\bwith or without a valid canadian work permit\\b"
       ],
       "no_sponsor": "\\bno (?:visa )?sponsorship\\b|\\b(?:unable|not able|cannot|can't|won't|will not|do not|don't|does not|doesn't|are not|is not|not)\\s+(?:\\w+\\s+){0,3}(?:sponsor|sponsorship)|\\bsponsorship (?:is |will |can )?(?:not|n't)\\b|\\bnot eligible for (?:\\w+\\s+){0,2}sponsorship\\b|\\bwithout (?:the need for )?(?:visa )?sponsorship\\b|\\bemployment authori[sz]ation is not\\b|\\bmust (?:have|hold|possess) (?:a )?(?:valid )?(?:work (?:visa|rights|permit)|working rights|right to work)\\b"
     }
   },
-  "_rules_version": 10,
+  "_rules_version": 11,
   "_rules_comment": "Rule lists (rejects, penalties, sectors, work rights, screening answers, category rules) are maintained by the program and refreshed when it updates. Your facts, countries, queries and minimum scores are yours.",
   "ai_facts": {
     "work_status": "GCC national (Bahraini): does not need visa sponsorship to work in other GCC countries; would need employer visa sponsorship for Canada or Australia and does not hold their citizenship or permanent residence."
   },
   "levels": {
     "_comment": "Shown as a tag and filter on every job.",
-    "senior": "\\b(senior|sr\\.?|lead|principal|manager|managing|head|director|chief|superintendent|deputy)\\b",
-    "starter": "\\b(fresh(er)?|graduate|trainee|junior|jr\\.?|intern(ship)?|entry[- ]level|apprentice|0\\s*(-|to)\\s*[12]\\s*(years|yrs))\\b",
+    "senior": "\\b(senior|sr\\.?|lead|principal|manager|managing|head|director|chief|superintendent|deputy|specialist|expert)\\b|(?<!assistant )(?<!asst\\. )(?<!asst )(?<!deputy )\\bresident engineer\\b|\\b(?:engineer|surveyor|estimator|planner|inspector|designer|controller)\\s+(?:iv|v|vi|vii)\\b",
+    "starter": "\\b(fresh(er)?|graduate|trainee|junior|jr\\.?|intern(ship)?|entry[- ]level|apprentice|associate(?!\\s+director)|engineer[- ]in[- ]training|eit|0\\s*(-|to)\\s*[12]\\s*(years|yrs))\\b",
     "support": "\\b(technician|inspector|supervisor|foreman|draftsman|draughtsman|operator|assistant|coordinator)\\b"
   },
   "generic_titles": {
