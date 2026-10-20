@@ -193,6 +193,42 @@ class AppAPI(unittest.TestCase):
             app.STATE["running"] = False
         self.assertEqual(self.req("POST", "/api/quit", {}, token=False)[0], 403)      # another site can't stop the app
 
+    def test_email_a_company_you_name(self):
+        from unittest import mock
+        st, _, body = self.req("POST", "/api/manual-draft", {"company": "Nesma & Partners", "position": "Site Engineer", "to": "hr@nesma.example"})
+        d = json.loads(body)
+        self.assertTrue(d["ok"], d)
+        self.assertIn("Site Engineer", d["subject"])
+        self.assertIn("Nesma & Partners", d["body"])
+        self.assertNotIn("{", d["body"])
+        self.assertFalse(json.loads(self.req("POST", "/api/manual-draft", {"company": "", "position": "Site Engineer", "to": "x@y.com"})[2])["ok"])
+        sent = []
+
+        class FakeSMTP:
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def send_message(self, msg): sent.append(msg)
+        (app.DATA / "CV.pdf").write_bytes(b"%PDF-1.4 test")
+        before = (app.DATA / "mail.json").read_text(encoding="utf-8")
+        (app.DATA / "mail.json").write_text('{"user": "me@example.com", "password": "pw", "preset": "gmail"}', encoding="utf-8")
+        try:
+            with mock.patch.object(app, "smtp_connect", lambda m: FakeSMTP()):
+                bad = json.loads(self.req("POST", "/api/send-manual", {"company": "Nesma", "position": "Site Engineer", "to": "not-an-address",
+                                                                       "subject": "s", "body": "b"})[2])
+                self.assertFalse(bad["ok"])
+                r = json.loads(self.req("POST", "/api/send-manual", {"company": "Nesma", "position": "Site Engineer", "to": "hr@nesma.example",
+                                                                     "subject": d["subject"], "body": d["body"], "country": "Saudi Arabia"})[2])
+            self.assertTrue(r["ok"], r)
+            self.assertEqual(len(sent), 1)
+            self.assertEqual(sent[0]["To"], "hr@nesma.example")
+            self.assertEqual(sent[0].get_payload()[1].get_content_type(), "application/pdf")       # the CV goes with it
+            from agent import tracker
+            row = tracker.load(app.DATA / "tracker.csv")[r["url"]]
+            self.assertEqual((row["status"], row["company"], row["title"], row["country"]), ("Applied", "Nesma", "Site Engineer", "Saudi Arabia"))
+        finally:
+            (app.DATA / "mail.json").write_text(before, encoding="utf-8")
+            (app.DATA / "CV.pdf").unlink(missing_ok=True)
+
     def test_page_only_reads_and_writes_its_own_files(self):
         for name in ("tracker.csv", "profile.json", "sources.json"):
             self.assertEqual(self.req("GET", "/api/file?path=" + name)[0], 200, name)

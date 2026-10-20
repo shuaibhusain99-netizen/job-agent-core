@@ -479,7 +479,51 @@ def draft_email(row: dict) -> dict:
     return {"to": row.get("apply_email", ""), "subject": subject, "body": body, "cv": "CV.pdf" if (DATA / "CV.pdf").exists() else ""}
 
 
-def send_application(url: str, to: str, subject: str, body: str) -> dict:
+def manual_job(company: str, position: str, country: str = "", ad: str = "") -> dict:
+    """A job you found yourself (a company e-mail from a friend, a newspaper, a website): shaped like a searched job."""
+    from agent.util import clean, guess_country
+    company, position = clean(company)[:120], clean(position)[:150]
+    if len(position) < 2:
+        raise ValueError("Write the position you are applying for")
+    if len(company) < 2:
+        raise ValueError("Write the company name")
+    country = country if country in COUNTRY_NAMES else (guess_country(clean(ad)[:400]) if ad else "")
+    return {"title": position, "company": company, "location": country or "Not specified", "country": country if country != "Other" else "",
+            "description": clean(ad or "", keep_lines=True)[:8000], "source": "Your e-mail", "url": "", "posted": ""}
+
+
+COUNTRY_NAMES = ("Saudi Arabia", "United Arab Emirates", "Qatar", "Kuwait", "Oman", "Bahrain", "Canada", "Australia")
+
+
+def manual_draft(company: str, position: str, to: str, country: str = "", ad: str = "", use_ai: bool = True) -> dict:
+    """Subject + letter for a company you name: written for that position (and for the ad, if you pasted it)."""
+    from agent import tailor
+    from agent.score import score
+    profile = json.loads((DATA / "profile.json").read_text(encoding="utf-8"))
+    c = profile["candidate"]
+    j = manual_job(company, position, country, ad)
+    probe = dict(j, description=j["description"] or j["title"])
+    score(probe, profile)                                  # only to know the kind of role (civil, HSE, QS ...) for the letter
+    j["category"] = probe.get("category", "civil")
+    body, by_ai = "", False
+    if use_ai and len(j["description"]) >= 150:
+        from agent import ai
+        s_ = ai.settings(_keys())
+        if s_:
+            try:
+                body, by_ai = ai.letter(j, profile, s_), True
+            except Exception:  # noqa - the standard letter below is used instead
+                body = ""
+    if not body:
+        body = re.sub(r"^\d{1,2} \w+ \d{4}\n+", "", tailor.cover_letter(j, profile))
+        body = body.replace("I would welcome the chance to discuss how my experience fits your project.",
+                            "My CV is attached, and I would welcome the chance to discuss how my experience fits your team.", 1)
+    return {"to": to, "subject": f"Application for {tailor.clean_title(j['title'])} - {c['name']}", "body": body,
+            "by_ai": by_ai, "cv": (DATA / "CV.pdf").exists()}
+
+
+def _deliver(to: str, subject: str, body: str):
+    """Send one application e-mail from your own address with your CV attached; keep a copy in data/sent."""
     rcpt = [x.strip() for x in re.split(r"[,;\s]+", to) if x.strip()]
     if not rcpt or len(rcpt) > 3 or not all(EMAIL_OK.fullmatch(x) for x in rcpt):
         raise ValueError("Check the To address (up to 3 plain e-mail addresses)")
@@ -489,8 +533,8 @@ def send_application(url: str, to: str, subject: str, body: str) -> dict:
     cv = DATA / "CV.pdf"
     if not cv.exists():
         raise ValueError("No CV attached yet - choose your CV PDF in the e-mail settings")
-    if len(subject) > 200 or len(body) > 20000:
-        raise ValueError("Subject or message is too long")
+    if not subject.strip() or len(subject) > 200 or len(body) > 20000 or "\n" in subject or "\r" in subject:
+        raise ValueError("Subject or message is too long (or empty)")
     msg = EmailMessage()
     msg["From"] = formataddr((m.get("from_name") or m["user"], m["user"]))
     msg["To"] = ", ".join(rcpt)
@@ -505,6 +549,41 @@ def send_application(url: str, to: str, subject: str, body: str) -> dict:
     stamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
     safe = "".join(ch if ch.isalnum() else "-" for ch in subject)[:60].strip("-")
     (sent / f"{stamp}_{safe}.eml").write_bytes(bytes(msg))     # your own copy; sent/ is never served to the page
+    return msg, stamp, safe
+
+
+def send_manual(company: str, position: str, to: str, subject: str, body: str, country: str = "", ad: str = "") -> dict:
+    """E-mail a company you named, then add it to Applications so it is tracked like every other application."""
+    import hashlib
+    from agent import tracker
+    j = manual_job(company, position, country, ad)
+    msg, stamp, safe = _deliver(to, subject, body)
+    today = datetime.now().date().isoformat()
+    url = "manual:" + hashlib.sha1(f"{msg['To']}|{j['title']}|{j['company']}|{stamp}".encode()).hexdigest()[:16]
+    row = {k: "" for k in tracker.FIELDS}
+    row.update(found_date=today, last_seen=today, score="", verdict="apply", title=j["title"], company=j["company"],
+               location=j["location"], country=j["country"], source="Your e-mail", url=url, status="Applied", applied_date=today,
+               touched=today, notes="you sent this application from the app", user_notes=f"e-mailed {msg['To']} {stamp[:10]}",
+               apply_email=msg["To"], desc_len=str(len(j["description"])), category="civil")
+    warn = ""
+    try:
+        if j["description"]:
+            _details().save(url, {"title": j["title"], "company": j["company"], "description": j["description"], "source": "Your e-mail"})
+        with tracker.locked(DATA / "tracker.csv"):
+            rows = tracker_rows_current()
+            rows.append(row)
+            tracker_write(rows, locked=True)
+    except Exception as e:  # noqa - the e-mail is out whatever happens here
+        warn = f"the job list couldn't be updated ({type(e).__name__}) - the e-mail itself was sent"
+    return {"ok": True, "to": msg["To"], "saved": f"sent/{stamp}_{safe}.eml", "warning": warn, "url": url}
+
+
+def send_application(url: str, to: str, subject: str, body: str) -> dict:
+    msg, stamp, safe = _deliver(to, subject, body)
+    return _record_sent(url, msg, stamp, safe)
+
+
+def _record_sent(url: str, msg, stamp: str, safe: str) -> dict:
     # the e-mail is out: from here on nothing may turn this into "not sent"
     from agent import tracker
     warn = ""
@@ -864,6 +943,18 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(send_application(str(d["url"]), str(d["to"]), str(d["subject"]), str(d["body"])))
             except Exception as e:
                 return self._json({"ok": False, "error": f"{type(e).__name__}: {e}"})
+        if u.path == "/api/manual-draft":
+            try:
+                return self._json({"ok": True} | manual_draft(str(d.get("company", "")), str(d.get("position", "")), str(d.get("to", "")),
+                                                               str(d.get("country", "")), str(d.get("ad", ""))[:20000]))
+            except ValueError as e:
+                return self._json({"ok": False, "error": str(e)})
+        if u.path == "/api/send-manual":
+            try:
+                return self._json(send_manual(str(d["company"]), str(d["position"]), str(d["to"]), str(d["subject"]), str(d["body"]),
+                                              str(d.get("country", "")), str(d.get("ad", ""))[:20000]))
+            except Exception as e:
+                return self._json({"ok": False, "error": f"{type(e).__name__}: {e}" if not isinstance(e, ValueError) else str(e)})
         if u.path == "/api/apply-site":
             try:
                 return self._json(apply_on_site(str(d["url"])))

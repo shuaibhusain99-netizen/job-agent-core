@@ -184,6 +184,7 @@ dialog.send{border:0;border-radius:var(--r);max-width:720px;width:calc(100% - 32
 dialog.send::backdrop{background:rgba(10,20,22,.45)}
 dialog.send h2{font-family:var(--display);margin:0 0 4px;font-weight:600}
 dialog.send textarea{min-height:280px}
+dialog.send #mcAd{min-height:90px}
 .toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%) translateY(20px);background:var(--ink);color:var(--paper);padding:9px 14px;border-radius:var(--r);opacity:0;transition:.2s;pointer-events:none;z-index:60;max-width:90vw;display:flex;gap:12px;align-items:center}
 .toast.show{opacity:1;transform:translateX(-50%)}
 .toast.act{pointer-events:auto}
@@ -199,6 +200,8 @@ dialog.send textarea{min-height:280px}
   .tb-actions{top:52px}
 }
 @media (max-width:720px){
+  .long{display:none}
+  #mailCo{white-space:nowrap}
   .body,.body.settings-on{grid-template-columns:minmax(0,1fr)}
   header.top{gap:8px;padding:8px 12px}
   .brand{font-size:16px}
@@ -226,6 +229,7 @@ dialog.send textarea{min-height:280px}
     </div>
     <div class="run">
       <div class="pill"><i class="dot" id="dot"></i><span id="stateText">Starting…</span></div>
+      <button id="mailCo" title="Apply to a company you found yourself: the app writes the e-mail and sends it with your CV">E-mail<span class="long"> a company</span></button>
       <button class="primary" id="runNow">Search now</button>
     </div>
   </header>
@@ -634,7 +638,7 @@ dialog.send textarea{min-height:280px}
       <div id="dVerdict"></div>
       <div class="part why"><h4>Why this score</h4><ul title="${esc(r.notes)}">${ex.lines.map(x=>`<li>${esc(x)}</li>`).join("")}</ul></div>
       <div class="part"><div class="top"><h4><label for="dNote">Your note</label></h4><span class="small faint" id="noteState"></span></div><textarea class="note-in" id="dNote" rows="2" maxlength="2000" placeholder="For example: called HR on Sunday, interview Tuesday">${esc(r.user_notes||"")}</textarea></div>
-      <div class="part" id="dAd"><div class="top"><h4>The ad</h4><a href="${esc(safeHref(r.url))}" target="_blank" rel="noopener noreferrer">Open the original</a></div><div class="faint small" id="adWait">Loading…</div></div>
+      <div class="part" id="dAd"><div class="top"><h4>The ad</h4>${/^https?:/i.test(r.url)?`<a href="${esc(safeHref(r.url))}" target="_blank" rel="noopener noreferrer">Open the original</a>`:""}</div><div class="faint small" id="adWait">Loading…</div></div>
       <div class="part" id="dPack" hidden></div></div>`;
     $("back").addEventListener("click",closeDetail);
     const note=$("dNote"); let nt=null, saved=r.user_notes||"";
@@ -718,6 +722,54 @@ dialog.send textarea{min-height:280px}
       applyT=setTimeout(tick,2500); }catch(_){ } };
     applyT=setTimeout(tick,2000);
   }
+  // ---------- apply by e-mail to a company you name (not from a search)
+  async function openMailCompany(){
+    if(!mail.has_password||!mail.user){ toast("Set up e-mail sending first",{label:"Open settings",fn:()=>openSettings("mailCard")}); return; }
+    if(!mail.has_cv){ toast("Add your CV first",{label:"Open settings",fn:()=>openSettings("mailCard")}); return; }
+    const dlg=$("sendDlg");
+    const C=["","Saudi Arabia","United Arab Emirates","Qatar","Kuwait","Oman","Bahrain","Canada","Australia"];
+    dlg.innerHTML=`<h2>E-mail a company</h2><p class="muted small">Tell the app who to write to. It writes the application e-mail for this position, you read it, and it sends it from your address with ${esc(mail.cv_name||"your CV")} attached. It then appears in Applications.</p>
+      <div class="field"><label for="mcCompany">Company name</label><input type="text" id="mcCompany" maxlength="120" required></div>
+      <div class="field"><label for="mcPosition">Position</label><input type="text" id="mcPosition" maxlength="150" required placeholder="Site Engineer"></div>
+      <div class="field"><label for="mcTo">Company e-mail <span class="faint">(up to 3, separated by commas)</span></label><input type="text" id="mcTo" maxlength="300" required placeholder="hr@company.com"></div>
+      <div class="field"><label for="mcCountry">Country <span class="faint">(optional)</span></label><select id="mcCountry">${C.map(c=>`<option value="${esc(c)}">${c?esc(c):"Not sure"}</option>`).join("")}</select></div>
+      <div class="field"><label for="mcAd">The job ad <span class="faint">(optional - paste it and the letter is written for it${aiActive?", by the AI reviewer":""})</span></label><textarea id="mcAd" rows="4" maxlength="20000"></textarea></div>
+      <div class="inline" style="justify-content:flex-end"><button id="mcCancel">Cancel</button><button class="primary" id="mcWrite">Write the e-mail</button></div>
+      <div id="mcDraft" hidden></div>`;
+    const v=id=>$(id).value.trim();
+    let orig=null;
+    const changed=()=>!!(v("mcCompany")||v("mcPosition")||v("mcTo")||v("mcAd"));
+    const close=()=>{ if(changed()&&!confirm("Close and lose this e-mail?")) return; dlg.close(); };
+    dlg.oncancel=e=>{ e.preventDefault(); close(); };
+    $("mcCancel").addEventListener("click",close);
+    const emailsOK=()=>{ const l=v("mcTo").split(/[,;\s]+/).filter(Boolean); return l.length>=1&&l.length<=3&&l.every(x=>/^[^@\s]+@[^@\s]+\.[a-z]{2,24}$/i.test(x)); };
+    $("mcWrite").addEventListener("click",async()=>{
+      for(const id of ["mcCompany","mcPosition","mcTo"]) if(!$(id).reportValidity()) return;
+      if(!emailsOK()){ toast("Check the company e-mail address"); $("mcTo").focus(); return; }
+      const b=$("mcWrite"); b.disabled=true; b.textContent="Writing…";
+      try{ const d=await api("/api/manual-draft",{company:v("mcCompany"),position:v("mcPosition"),to:v("mcTo"),country:$("mcCountry").value,ad:$("mcAd").value});
+        if(d.ok===false){ toast(d.error||"Couldn't write it"); return; }
+        $("mcDraft").hidden=false;
+        $("mcDraft").innerHTML=`<hr style="border:0;border-top:1px solid var(--rule);margin:14px 0">
+          <p class="small muted">${d.by_ai?"Written by the AI reviewer for this ad - read it before you send.":"Written from your CV facts for this position - read it, change anything you like."}</p>
+          <div class="field"><label for="mcSub">Subject</label><input type="text" id="mcSub" maxlength="200" value="${esc(d.subject)}"></div>
+          <div class="field"><label for="mcBody">Message</label><textarea id="mcBody" style="min-height:260px">${esc(d.body)}</textarea></div>
+          <div class="inline" style="justify-content:flex-end"><span class="small faint">To: ${esc(v("mcTo"))}</span><button class="primary" id="mcSend">Send application</button></div>`;
+        b.textContent="Write it again";
+        $("mcSend").addEventListener("click",async()=>{
+          const s=$("mcSend"); if(!emailsOK()){ toast("Check the company e-mail address"); return; }
+          s.disabled=true; s.textContent="Sending…";
+          try{ const r=await api("/api/send-manual",{company:v("mcCompany"),position:v("mcPosition"),to:v("mcTo"),country:$("mcCountry").value,ad:$("mcAd").value,subject:$("mcSub").value.trim(),body:$("mcBody").value});
+            if(r.ok){ dlg.close(); toast("Application sent to "+r.to+(r.warning?" - but "+r.warning:" - it's in Applications now")); loadAll(true); }
+            else { toast(r.error||"Not sent"); s.disabled=false; s.textContent="Send application"; } }
+          catch(e){ toast("Not sent: "+e.message); s.disabled=false; s.textContent="Send application"; } });
+        $("mcSub").focus(); $("mcDraft").scrollIntoView({block:"start"});
+      }catch(e){ toast("Couldn't write it: "+e.message); }
+      finally{ b.disabled=false; if(b.textContent==="Writing…") b.textContent="Write the e-mail"; }
+    });
+    dlg.showModal(); $("mcCompany").focus();
+  }
+  $("mailCo").addEventListener("click",openMailCompany);
   async function openSend(r){
     if(!mail.has_password||!mail.user){ toast("Set up e-mail sending first",{label:"Open settings",fn:()=>openSettings("mailCard")}); return; }
     if(!mail.has_cv){ toast("Add your CV first",{label:"Open settings",fn:()=>openSettings("mailCard")}); return; }
