@@ -6,6 +6,7 @@ from xml.etree import ElementTree as ET
 
 from pathlib import Path
 from .util import http, http_json, job, clean, log, guess_country, countries
+from . import sitebrowse
 
 
 # ---------------------------------------------------------------- Jooble (free API key)
@@ -770,7 +771,7 @@ def enrich_oracle(j: dict) -> None:
 
 
 ENRICHERS = {"Workday": enrich_workday, "SuccessFactors": enrich_successfactors, "Workable": enrich_workable,
-             "LinkedIn": enrich_linkedin, "Rigzone": enrich_rigzone, "Career site": lambda j: enrich_career(j)}
+             "LinkedIn": enrich_linkedin, **{n: sitebrowse.enrich for n in sitebrowse.DETAIL_SOURCES}, "Rigzone": enrich_rigzone, "Career site": lambda j: enrich_career(j)}
 
 
 def enrich_smartrecruiters(j: dict) -> None:
@@ -831,7 +832,7 @@ def enrich_career(j: dict) -> None:
 def enrich(j: dict) -> None:
     """Fetch the full posting text for sources that only gave a title in the listing."""
     fn = ENRICHERS.get(j["source"])
-    if fn and len(j.get("description", "")) < 300:
+    if fn and (len(j.get("description", "")) < 300 or j.get("_snippet")):
         try:
             fn(j)
         except Exception as e:  # never let one posting kill the run
@@ -843,7 +844,7 @@ def fetch_all(sources: dict, profile: dict) -> list[dict]:
     with polite pauses."""
     from concurrent.futures import ThreadPoolExecutor
     fetchers = [
-        ("linkedin_guest", fetch_linkedin), ("seek", fetch_seek), ("workday", fetch_workday), ("rigzone", fetch_rigzone),
+        ("linkedin_guest", fetch_linkedin), ("browser_sites", sitebrowse.fetch), ("seek", fetch_seek), ("workday", fetch_workday), ("rigzone", fetch_rigzone),
         ("newspapers", fetch_wordpress), ("successfactors", fetch_successfactors), ("workable", fetch_workable),
         ("jooble", fetch_jooble), ("gulftalent", fetch_gulftalent), ("google_alerts_rss", fetch_rss),
         ("greenhouse", fetch_greenhouse), ("lever", fetch_lever), ("smartrecruiters", fetch_smartrecruiters),
@@ -872,7 +873,7 @@ def enrich_many(jobs: list[dict], budget: int) -> int:
     """Fetch full ads for up to `budget` jobs (best first). One worker per website, so each site still sees one
     request at a time. Returns how many were fetched."""
     from concurrent.futures import ThreadPoolExecutor
-    picked = [j for j in jobs if j.get("source") in ENRICHERS and len(j.get("description", "")) < 300][:budget]
+    picked = [j for j in jobs if j.get("source") in ENRICHERS and (len(j.get("description", "")) < 300 or j.get("_snippet"))][:budget]
     from urllib.parse import urlparse
     by_site: dict[str, list] = {}
     for j in picked:                                   # group by website host (career sites are many different hosts)

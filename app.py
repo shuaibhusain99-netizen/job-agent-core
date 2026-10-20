@@ -26,7 +26,7 @@ DATA = HOME / "data"
 PORT = 8765
 TOKEN = secrets.token_urlsafe(24)       # per-launch secret written into the page; every /api call must carry it
 PRIVATE_FILES = {"mail.json", "CV.pdf"}
-PRIVATE_DIRS = {"browser", "sent"}
+PRIVATE_DIRS = {"browser", "browser-search", "sent"}
 
 
 def ensure_data():
@@ -163,6 +163,11 @@ def run_agent(block: bool = False) -> bool:
             STATE["log"].append(f"ERROR: {type(e).__name__}: {e}")
             print(f"ERROR: {type(e).__name__}: {e}", file=buf)
         finally:
+            try:
+                from agent import sitebrowse
+                sitebrowse.close()
+            except Exception:
+                pass
             sys.stderr, sys.stdout = old_err, old_out
             text = buf.getvalue()
             summ = next((l for l in text.splitlines() if l.startswith("===")), None)

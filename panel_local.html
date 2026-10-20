@@ -300,6 +300,13 @@ section.settings{overflow:auto;padding:22px 26px 60px}
           <div id="keysBox"></div>
           <div class="inline" style="margin-top:10px"><button class="primary" id="saveKeys" disabled>Save keys</button></div>
         </div>
+        <div class="card">
+          <h3>Job boards read in your browser</h3>
+          <p class="hint">These sites block programs, so the agent opens their search pages in its own Edge/Chrome window on this computer and reads the job lists, like you browsing. It never clicks, signs in or applies. If a site asks to check you're human, it's skipped for that search and tried again next time. No e-mails needed.</p>
+          <div class="inline" id="boardsBox"></div>
+          <label class="toggle" style="margin-top:10px"><input type="checkbox" id="bShow"> Show the browser window while it searches</label>
+          <div class="inline" style="margin-top:10px"><button class="primary" id="saveBoards" disabled>Save</button></div>
+        </div>
       </div>
     </section>
   </div>
@@ -348,7 +355,7 @@ section.settings{overflow:auto;padding:22px 26px 60px}
       profile=JSON.parse(pf); tracker=parseCSV(tr); keys=JSON.parse(kf);
       tracker.forEach(r=>{ r.category=r.category||"civil"; });
       detailCache={};
-      renderSettings(); renderKeys(); buildFilters(); render(); loadStatus(); loadMail(); loadAI();
+      renderSettings(); renderKeys(); buildFilters(); render(); loadStatus(); loadMail(); loadAI(); loadBoards();
       if(keepSel&&selUrl) openDetail(selUrl,false);
     }catch(e){ setState("off","Can't reach the app - start JobAgent again"); toast("Couldn't load: "+e.message); }
   }
@@ -613,6 +620,27 @@ section.settings{overflow:auto;padding:22px 26px 60px}
     });
   }
   $("saveKeys").addEventListener("click",async()=>{ try{ const fresh=JSON.parse(await getFile("keys.json")); fresh.jooble=keys.jooble; await putFile("keys.json",JSON.stringify(fresh,null,2)+"\n"); keysDirty=false; $("saveKeys").disabled=true; toast("Keys saved"); }catch(e){ toast("Not saved: "+e.message); } });
+
+  // ---------- settings: job boards read through the browser (sources.json -> browser_sites)
+  const BOARDS=[["indeed","Indeed"],["bayt","Bayt"],["naukrigulf","NaukriGulf"],["gulftalent","GulfTalent"],["jobbank","Job Bank Canada"]];
+  let boardsCfg=null;
+  async function loadBoards(){
+    try{ const src=JSON.parse(await getFile("sources.json")); boardsCfg=src.browser_sites||{sites:{}}; }catch(e){ boardsCfg=null; }
+    const box=$("boardsBox"); box.innerHTML="";
+    if(!boardsCfg){ box.innerHTML='<span class="faint small">Not available until the first search has run.</span>'; return; }
+    const sites=boardsCfg.sites||{};
+    BOARDS.forEach(([k,label])=>{
+      const l=document.createElement("label"); l.className="toggle";
+      l.innerHTML=`<input type="checkbox" ${sites[k]!==false&&boardsCfg.enabled!==false?"checked":""}> ${esc(label)}`;
+      l.querySelector("input").addEventListener("change",e=>{ (boardsCfg.sites=boardsCfg.sites||{})[k]=e.target.checked; $("saveBoards").disabled=false; });
+      box.appendChild(l);
+    });
+    $("bShow").checked=!!boardsCfg.show_window;
+  }
+  $("bShow").addEventListener("change",e=>{ if(boardsCfg){ boardsCfg.show_window=e.target.checked; $("saveBoards").disabled=false; } });
+  $("saveBoards").addEventListener("click",async()=>{ try{ const src=JSON.parse(await getFile("sources.json")); const b=src.browser_sites||{};
+      b.sites=boardsCfg.sites; b.show_window=!!boardsCfg.show_window; b.enabled=Object.values(b.sites||{}).some(Boolean); src.browser_sites=b;
+      await putFile("sources.json",JSON.stringify(src,null,2)+"\n"); $("saveBoards").disabled=true; toast("Saved - applies from the next search"); }catch(e){ toast("Not saved: "+e.message); } });
 
   // ---------- settings: AI
   async function loadAI(){

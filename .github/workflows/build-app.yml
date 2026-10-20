@@ -20,7 +20,7 @@ jobs:
           pyinstaller --onefile --noconsole --name JobAgent --clean
           --add-data "panel_local.html;." --add-data "agent/filler.js;agent" --add-data "profile.json;." --add-data "keys.json;." --add-data "sources.json;."
           --hidden-import main --hidden-import agent --hidden-import agent.sources --hidden-import agent.score
-          --hidden-import agent.tailor --hidden-import agent.tracker --hidden-import agent.util --hidden-import agent.browser --hidden-import agent.ai --hidden-import agent.details
+          --hidden-import agent.tailor --hidden-import agent.tracker --hidden-import agent.util --hidden-import agent.browser --hidden-import agent.ai --hidden-import agent.details --hidden-import agent.sitebrowse
           app.py
       - name: Check Windows-only parts (password encryption)
         shell: pwsh

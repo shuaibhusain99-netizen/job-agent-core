@@ -11,6 +11,7 @@ from datetime import date
 from pathlib import Path
 
 from agent.sources import fetch_all, enrich_many, load_keys
+from agent import sitebrowse
 from agent.score import score
 from agent.tailor import application_pack
 from agent import tracker, ai, details
@@ -31,6 +32,7 @@ def main() -> int:
     global CATEGORY_NAMES
     CATEGORY_NAMES = {"civil"} | {k for k in PROFILE.get("categories", {}) if not k.startswith("_")}
     details.ROOT = ROOT / "details"
+    sitebrowse.PROFILE_DIR = ROOT / "browser-search"
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry", action="store_true", help="don't write tracker/sheet")
     ap.add_argument("--max-enrich", type=int, default=300, help="how many jobs get their full ad fetched (best first)")
@@ -86,7 +88,10 @@ def main() -> int:
             if not tracker._untouched(row) or tracker._known_len(row) >= 400:
                 continue
         want.append(j)
-    fetched = enrich_many(want, args.max_enrich)
+    try:
+        fetched = enrich_many(want, args.max_enrich)
+    finally:
+        sitebrowse.close()                      # the search browser is not needed after this
     for j in want:
         if len(j.get("description", "")) >= 300:
             j["match_score"], j["verdict"], r = score(j, PROFILE)

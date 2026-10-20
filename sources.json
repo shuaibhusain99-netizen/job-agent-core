@@ -15,8 +15,8 @@
     ]
   },
   "gulftalent": {
-    "_comment": "Best effort HTML. Blocked from some datacenter IPs (403); skipped automatically when blocked.",
-    "enabled": true,
+    "_comment": "Replaced by browser_sites (GulfTalent refuses plain downloads).",
+    "enabled": false,
     "country_slugs": {
       "Saudi Arabia": "saudi-arabia",
       "United Arab Emirates": "uae",
@@ -272,7 +272,7 @@
       }
     ]
   },
-  "_version": 4,
+  "_version": 5,
   "oracle": {
     "_comment": "Oracle Recruiting Cloud career sites (public JSON).",
     "pages": 2,
@@ -376,6 +376,29 @@
         "company": "Jacobs",
         "origin": "jacobs.jobs"
       }
+    ]
+  },
+  "browser_sites": {
+    "_comment": "Indeed, Bayt, NaukriGulf, GulfTalent and Job Bank Canada block plain downloads, so they are read in a real browser on this computer (Edge/Chrome, own profile, window kept off-screen). It only reads result pages and job pages: no clicking, no sign-in, no applying. A site that asks to verify you are human is skipped for that run.",
+    "enabled": true,
+    "show_window": false,
+    "pages": 1,
+    "sites": {
+      "indeed": true,
+      "bayt": true,
+      "naukrigulf": true,
+      "gulftalent": true,
+      "jobbank": true
+    },
+    "queries": [
+      "civil engineer",
+      "site engineer",
+      "graduate civil engineer",
+      "quantity surveyor",
+      "QA QC engineer",
+      "planning engineer",
+      "HSE officer",
+      "document controller"
     ]
   }
 }
