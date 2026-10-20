@@ -259,6 +259,26 @@ def open_tab(port: int) -> dict:
     return json.loads(urllib.request.urlopen(req, timeout=10).read())
 
 
+_USED: set[str] = set()
+
+
+def visible_tab(port: int) -> dict:
+    """The tab the person actually sees: the browser's own blank start tab when it is still unused, else a new tab.
+    (Edge can put a tab made with /json/new in a window you don't see - the apply page then 'never opens'.)"""
+    try:
+        targets = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/json/list", timeout=5).read())
+    except Exception:
+        targets = []
+    for t in targets:
+        if t.get("type") == "page" and t.get("url") in ("about:blank", "edge://newtab/", "chrome://newtab/") \
+                and t.get("id") not in _USED and t.get("webSocketDebuggerUrl"):
+            _USED.add(t["id"])
+            return t
+    t = open_tab(port)
+    _USED.add(t.get("id", ""))
+    return t
+
+
 # ------------------------------------------------------------------ the filler
 TRUSTED_HOSTS = [
     "linkedin.com", "myworkdayjobs.com", "myworkdaysite.com", "workday.com", "successfactors.com", "successfactors.eu", "sapsf.com",
@@ -298,7 +318,7 @@ class ApplySession:
         self.url, self.cv, self.on_submitted = url, cv_path, on_submitted
         self.world = "jobagent_" + base64.b32encode(os.urandom(10)).decode().lower().rstrip("=")
         port = launch(profile_dir or Path("browser"), headless=headless)
-        info = open_tab(port)
+        info = visible_tab(port)
         self.tab = Tab(info["webSocketDebuggerUrl"])
         self.ctx_id = None
         self.ctx_ids: list[int] = []          # isolated contexts of the main frame (Chrome may add empty ones)
@@ -313,6 +333,14 @@ class ApplySession:
             pass
         self.tab.call("Page.addScriptToEvaluateOnNewDocument", source=filler_script(profile, job, years), worldName=self.world)
         self.tab.call("Page.navigate", url=url)
+        try:
+            self.tab.call("Page.bringToFront", timeout=5)      # show it - in front of the browser's other tabs/windows
+        except Exception:
+            pass
+        try:                                                   # and raise its window
+            urllib.request.urlopen(f"http://127.0.0.1:{port}/json/activate/{info.get('id', '')}", timeout=5).read()
+        except Exception:
+            pass
         self.stop = False
         self.done = False
         self.log: list[str] = []
@@ -353,8 +381,14 @@ class ApplySession:
             self._find_ctx()
         if not self.ctx_id:
             return None
-        r = self.tab.call("Runtime.evaluate", timeout=timeout, expression=expr, contextId=self.ctx_id,
-                          returnByValue=by_value, awaitPromise=True)
+        try:
+            r = self.tab.call("Runtime.evaluate", timeout=timeout, expression=expr, contextId=self.ctx_id,
+                              returnByValue=by_value, awaitPromise=True)
+        except RuntimeError as e:
+            if "context" in str(e).lower():                    # the page moved on: find the helper again next time
+                self.ctx_id = None
+                return None
+            raise
         res = r.get("result", {})
         return res.get("value") if by_value else res.get("objectId")
 
