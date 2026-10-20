@@ -47,7 +47,8 @@
         "company": "Parsons",
         "tenant": "parsons",
         "host": "wd5",
-        "site": "Search"
+        "site": "Search",
+        "country_param": "locationCountry"
       },
       {
         "company": "KBR",
@@ -60,9 +61,43 @@
         "tenant": "bakerhughes",
         "host": "wd5",
         "site": "BakerHughes"
+      },
+      {
+        "company": "AtkinsRéalis",
+        "tenant": "slihrms",
+        "host": "wd3",
+        "site": "Careers",
+        "country_param": "Location_Country"
+      },
+      {
+        "company": "Hitachi Energy",
+        "tenant": "hitachi",
+        "host": "wd1",
+        "site": "hitachi",
+        "country_param": "locationCountry"
+      },
+      {
+        "company": "GE Vernova",
+        "tenant": "gevernova",
+        "host": "wd5",
+        "site": "Vernova_ExternalSite"
+      },
+      {
+        "company": "JLL",
+        "tenant": "jll",
+        "host": "wd1",
+        "site": "jllcareers",
+        "country_param": "locationCountry"
+      },
+      {
+        "company": "EllisDon",
+        "tenant": "ellisdon",
+        "host": "wd3",
+        "site": "Ellis-Don",
+        "country_param": "locationCountry"
       }
     ],
-    "pages": 5
+    "pages": 3
   },
   "successfactors": {
     "_comment": "SAP SuccessFactors career sites (search page HTML). base = site root, slug = path segment.",
@@ -71,6 +106,57 @@
         "company": "alfanar",
         "base": "https://jobs.alfanar.com",
         "slug": "alfanar"
+      },
+      {
+        "company": "ACWA Power",
+        "base": "https://careers.acwapower.com",
+        "slug": ""
+      },
+      {
+        "company": "Red Sea Global",
+        "base": "https://careers.theredsea.sa",
+        "slug": "",
+        "country": "Saudi Arabia"
+      },
+      {
+        "company": "Bureau Veritas",
+        "base": "https://careers.bureauveritas.com",
+        "slug": ""
+      },
+      {
+        "company": "Mott MacDonald",
+        "base": "https://apply.mottmac.com",
+        "slug": ""
+      },
+      {
+        "company": "OQ",
+        "base": "https://careers.oq.com",
+        "slug": ""
+      },
+      {
+        "company": "Borouge",
+        "base": "https://careers.borouge.com",
+        "slug": ""
+      },
+      {
+        "company": "Hatch",
+        "base": "https://jobs.hatch.com",
+        "slug": ""
+      },
+      {
+        "company": "PCL Construction",
+        "base": "https://careers.pcl.com",
+        "slug": ""
+      },
+      {
+        "company": "Aecon",
+        "base": "https://jobs.aecon.com",
+        "slug": ""
+      },
+      {
+        "company": "City of Vancouver",
+        "base": "https://jobs.vancouver.ca",
+        "slug": ""
       }
     ]
   },
@@ -84,6 +170,14 @@
       {
         "company": "CBS",
         "account": "cbs-9"
+      },
+      {
+        "company": "Qiddiya",
+        "account": "qiddiya-investment-company-1"
+      },
+      {
+        "company": "Intertek",
+        "account": "intertek"
       }
     ]
   },
@@ -91,10 +185,37 @@
     "boards": []
   },
   "lever": {
-    "boards": []
+    "boards": [
+      {
+        "company": "Aldar",
+        "site": "aldar"
+      }
+    ]
   },
   "smartrecruiters": {
-    "companies": []
+    "_comment": "Filtered by country on the server.",
+    "companies": [
+      {
+        "id": "EgisGroup",
+        "company": "Egis"
+      },
+      {
+        "id": "Masdar",
+        "company": "Masdar"
+      },
+      {
+        "id": "SGS",
+        "company": "SGS"
+      },
+      {
+        "id": "TurnerTownsend",
+        "company": "Turner & Townsend"
+      },
+      {
+        "id": "Ramboll3",
+        "company": "Ramboll"
+      }
+    ]
   },
   "seek": {
     "_comment": "SEEK Australia public search API (no key). Listing gives title/teaser/bullets/location/salary; job pages are blocked so scoring uses the listing text.",
@@ -151,5 +272,110 @@
       }
     ]
   },
-  "_version": 3
+  "_version": 4,
+  "oracle": {
+    "_comment": "Oracle Recruiting Cloud career sites (public JSON).",
+    "pages": 2,
+    "boards": [
+      {
+        "company": "WSP",
+        "base": "https://emit.fa.ca3.oraclecloud.com",
+        "site": "CX_2001"
+      },
+      {
+        "company": "Wood",
+        "base": "https://ehif.fa.em2.oraclecloud.com",
+        "site": "CX_1"
+      },
+      {
+        "company": "McDermott",
+        "base": "https://edsv.fa.us2.oraclecloud.com",
+        "site": "CX_1"
+      },
+      {
+        "company": "Hill International",
+        "base": "https://hcib.fa.us2.oraclecloud.com",
+        "site": "CX_1001"
+      },
+      {
+        "company": "Technip Energies",
+        "base": "https://hcxg.fa.em2.oraclecloud.com",
+        "site": "CX_1"
+      },
+      {
+        "company": "Arcadis",
+        "base": "https://ebcs.fa.em2.oraclecloud.com",
+        "site": "CX_1"
+      },
+      {
+        "company": "Emaar",
+        "base": "https://emhm.fa.em2.oraclecloud.com",
+        "site": "CX_1001"
+      }
+    ]
+  },
+  "phenom": {
+    "_comment": "Phenom career sites.",
+    "pages": 2,
+    "boards": [
+      {
+        "company": "ADNOC",
+        "base": "https://jobs.adnoc.ae/us/en"
+      },
+      {
+        "company": "Bechtel",
+        "base": "https://jobs.bechtel.com/us/en"
+      },
+      {
+        "company": "Mace",
+        "base": "https://careers.macegroup.com/gb/en"
+      },
+      {
+        "company": "Ma'aden",
+        "base": "https://careers.maaden.com/gb/en"
+      }
+    ]
+  },
+  "eightfold": {
+    "_comment": "Eightfold career sites.",
+    "pages": 2,
+    "boards": [
+      {
+        "company": "NEOM",
+        "host": "careers.neom.com",
+        "domain": "neom.com",
+        "api": "v2"
+      },
+      {
+        "company": "Worley",
+        "host": "jobs.worley.com",
+        "domain": "worley.com",
+        "api": "pcsx"
+      },
+      {
+        "company": "Fluor",
+        "host": "careers.fluor.com",
+        "domain": "fluor.com",
+        "api": "v2"
+      }
+    ]
+  },
+  "jobsyn": {
+    "_comment": "DirectEmployers .jobs sites (full ad text included).",
+    "pages": 2,
+    "boards": [
+      {
+        "company": "AECOM",
+        "origin": "aecom.jobs"
+      },
+      {
+        "company": "Stantec",
+        "origin": "stantec.jobs"
+      },
+      {
+        "company": "Jacobs",
+        "origin": "jacobs.jobs"
+      }
+    ]
+  }
 }

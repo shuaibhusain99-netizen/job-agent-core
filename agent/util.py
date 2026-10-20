@@ -139,6 +139,10 @@ _TARGET_RX = [(c, _W("|".join(v))) for c, v in TARGET_NAMES.items()]
 _OTHER_RX = _W("|".join(OTHER_NAMES))
 _REGION_RX = [(c, _W("|".join(v))) for c, v in REGIONS.items()]
 _CITY_RX = [(c, _W("|".join(re.escape(x) for x in v))) for c, v in CITIES.items()]
+_CITY_RX_MAP = dict(_CITY_RX)
+ISO_TARGET = {"SA": "Saudi Arabia", "SAU": "Saudi Arabia", "KSA": "Saudi Arabia", "AE": "United Arab Emirates", "ARE": "United Arab Emirates",
+              "QA": "Qatar", "QAT": "Qatar", "KW": "Kuwait", "KWT": "Kuwait", "OM": "Oman", "OMN": "Oman", "BH": "Bahrain", "BHR": "Bahrain",
+              "CA": "Canada", "CAN": "Canada", "AU": "Australia", "AUS": "Australia"}
 
 
 def guess_country(location: str) -> str:
@@ -154,6 +158,17 @@ def guess_country(location: str) -> str:
     for c, rx in _REGION_RX:
         if rx.search(loc):
             return c
+    # country codes: last comma token ("Muscat, OM", "Riyadh, SAU") or a leading "SA.Riyadh" / "AE - Dubai"
+    if re.fullmatch(r"[A-Z]{2,3}", loc):                # the whole location is a country code ("UZ", "SAU")
+        return ISO_TARGET.get(loc, "Other")
+    au_city = _CITY_RX_MAP["Australia"].search(loc)
+    last = loc.split(",")[-1].strip().upper() if "," in loc else ""
+    lead = re.match(r"^([A-Z]{2,3})\s*(?:\.|-+|\s-)\s*\S", loc)
+    for code in (last, lead.group(1) if lead else ""):
+        if code == "SA" and au_city:
+            return "Australia"                        # South Australia, not Saudi Arabia
+        if code in ISO_TARGET:
+            return ISO_TARGET[code]
     for code in re.findall(r",\s*([A-Z]{2,3})\b", loc):
         if code in CA_CODES:
             return "Canada"
