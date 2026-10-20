@@ -162,20 +162,37 @@ def score(j: dict, profile: dict) -> tuple[int, str, list[str]]:
         if c.get("requires_sector") and j["sector"] != c["requires_sector"]:
             continue                               # e.g. the Oil & Gas list only takes jobs that really are oil & gas
         s, v, r = _score_one(j, profile, key, c)
-        if best is None or s > best[0]:
-            best = (s, v, r, key)
+        rank = (s, "title not in category" not in r)   # on a tie (e.g. all 0), keep the category whose title matched:
+        if best is None or rank > best[4]:             # its reason ("asks 8+ yrs") explains the result, "not in category" doesn't
+            best = (s, v, r, key, rank)
     j["category"] = best[3]
     j["level"] = find_level(j, profile)
+    verdict = best[1]
+    reasons = list(best[2])
+    text = (j["title"] + " " + j.get("description", "")).lower()
+    if verdict == "apply" and j["level"] == "senior":
+        lo, _ = required_years(text)
+        if lo is None or lo > years_experience(profile) + 1:
+            verdict = "maybe"                      # senior / lead titles usually want far more years: worth a look, not a send
+            reasons.append("senior title - check the years asked")
+    wr = (profile.get("work_rights") or {}).get(j.get("country") or "", {})
+    if verdict == "apply" and wr.get("visa_needed"):
+        no = wr.get("no_sponsor") and re.search(wr["no_sponsor"], text, re.I)
+        yes = any(re.search(sig, text, re.I) for sig in wr.get("sponsor_signals", []))
+        if no or not yes:
+            verdict = "maybe"                      # you need a sponsored work visa there: To apply only when they can sponsor
+            reasons.append("needs a work visa - the ad doesn't say they sponsor")
+        else:
+            reasons.append("may sponsor a visa")
     j["salary"] = find_salary(j["title"] + " " + j.get("description", ""))
     j["apply_email"] = find_apply_email(j.get("description", ""))
-    reasons = list(best[2])
     if j["sector"]:
         reasons.append("sector:" + j["sector"])
     if j["salary"]:
         reasons.append("pay: " + j["salary"])
     if j["apply_email"]:
         reasons.append("apply by e-mail")
-    return best[0], best[1], reasons
+    return best[0], verdict, reasons
 
 
 def _score_one(j: dict, profile: dict, cat: str, c: dict) -> tuple[int, str, list[str]]:
@@ -246,11 +263,20 @@ def _score_one(j: dict, profile: dict, cat: str, c: dict) -> tuple[int, str, lis
         pts += 8
         reasons.append("starter role")
 
-    # 6. Industry check for roles that exist in every industry (stores, reporting): must be construction/utility/industrial
+    # 6. Industry checks. Titles that exist in every industry (project engineer, stores, reporting ...) only count fully when
+    #    the title, company or ad shows construction / infrastructure work. With only a listing snippet we can't tell yet:
+    #    a small penalty, and the full ad (fetched for promising jobs) decides.
+    ctx_text = text + " " + j.get("company", "").lower()
+    short = len(desc) < 400
     need = c.get("require_any")
-    if need and not any(re.search(_word(w), text) for w in need):
-        pts -= 20
-        reasons.append("not construction/utility/industrial")
+    if need and not any(re.search(_word(w), ctx_text) for w in need):
+        pts -= 5 if short else 20
+        reasons.append("industry unclear" if short else "not construction/utility/industrial")
+    gen = profile.get("generic_titles") or {}
+    if gen.get("context") and matched and all(t in gen.get("titles", []) for t in matched) \
+            and not re.search(gen["context"], ctx_text, re.I):
+        pts -= 10 if short else 25
+        reasons.append("industry unclear" if short else "not clearly civil / construction work")
 
     # 7. Keyword points (capped so a long description can't dominate)
     kw = 0

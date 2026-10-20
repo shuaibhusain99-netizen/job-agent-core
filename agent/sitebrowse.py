@@ -14,7 +14,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from urllib.parse import quote_plus
 
-from .util import job, clean, log, guess_country, countries, window, dedupe_key
+from .util import job, clean, log, guess_country, countries, window
 from . import util
 
 PROFILE_DIR = Path("browser-search")          # set by main to <data>/browser-search
@@ -341,7 +341,7 @@ def _read_site(key: str, cfg: dict, profile: dict, sess: Session) -> list[dict]:
                                 clean(text), name, c, posted)
                         if site["detail"]:
                             j["_snippet"] = True             # only the list's summary so far: worth opening the full ad
-                        unknown += dedupe_key(j) not in util.KNOWN
+                        unknown += not util.is_known(j)
                         out.append(j)
                     if new < 10 or not unknown:
                         break                                # last page, or only jobs seen before

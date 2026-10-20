@@ -53,7 +53,7 @@ def ensure_data():
 # Rule sets the program owns: replaced when a newer program version ships new rules (_rules_version goes up).
 # Your own facts and choices (candidate, form answers, evidence, countries, queries, minimum scores) are never changed.
 RULE_KEYS = ("hard_reject_patterns", "title_reject_patterns", "title_penalties", "title_penalty_exempt", "sectors", "work_rights",
-             "screening_answers", "target_titles", "keyword_points")
+             "screening_answers", "target_titles", "keyword_points", "levels", "generic_titles")
 CATEGORY_RULE_KEYS = ("target_titles", "keyword_points", "requires_sector", "require_any", "label")
 
 
@@ -100,7 +100,15 @@ def upgrade_config():
         user = json.loads((DATA / "sources.json").read_text(encoding="utf-8"))
         bundled = json.loads((BUNDLE / "sources.json").read_text(encoding="utf-8"))
         if int(user.get("_version", 0)) < int(bundled.get("_version", 0)):
-            tracker.atomic_write(DATA / "sources.json", json.dumps(bundled, indent=2, ensure_ascii=False) + "\n")   # sources are program-owned
+            # sources are program-owned, except the on/off choices you can make in the app
+            mine, new = user.get("browser_sites") or {}, bundled.get("browser_sites")
+            if isinstance(mine, dict) and isinstance(new, dict):
+                for k in ("show_window", "enabled"):
+                    if k in mine:
+                        new[k] = mine[k]
+                if isinstance(mine.get("sites"), dict):
+                    new.setdefault("sites", {}).update({k: v for k, v in mine["sites"].items() if k in new.get("sites", {})})
+            tracker.atomic_write(DATA / "sources.json", json.dumps(bundled, indent=2, ensure_ascii=False) + "\n")
     except Exception as e:  # noqa
         print(f"sources upgrade skipped: {e}")
 
@@ -356,11 +364,12 @@ def send_application(url: str, to: str, subject: str, body: str) -> dict:
     safe = "".join(ch if ch.isalnum() else "-" for ch in subject)[:60].strip("-")
     (sent / f"{stamp}_{safe}.eml").write_bytes(bytes(msg))     # your own copy; sent/ is never served to the page
     from agent import tracker
-    with tracker.LOCK:
+    with tracker.locked(DATA / "tracker.csv"):
         rows = tracker_rows()
         for r in rows:
             if r.get("url") == url:
                 r["status"] = "Applied"; r["applied_date"] = r.get("applied_date") or datetime.now().date().isoformat()
+                r["touched"] = datetime.now().date().isoformat()
                 r["user_notes"] = (r.get("user_notes", "") + f" | e-mailed {msg['To']} {stamp[:10]}").strip(" |")
         tracker_write(rows, locked=True)
     return {"ok": True, "to": msg["To"], "saved": f"sent/{stamp}_{safe}.eml"}
@@ -396,13 +405,14 @@ def apply_on_site(url: str) -> dict:
 
 def mark_status(url: str, status: str) -> dict:
     from agent import tracker
-    with tracker.LOCK:
+    with tracker.locked(DATA / "tracker.csv"):            # also blocks the scheduled search (separate process) meanwhile
         rows = tracker_rows()
         hit = False
         for r in rows:
             if r.get("url") == url:
                 hit = True
                 r["status"] = status
+                r["touched"] = datetime.now().date().isoformat()
                 if status == "Applied":
                     r["applied_date"] = r.get("applied_date") or datetime.now().date().isoformat()
         if hit:
@@ -419,18 +429,22 @@ def apply_edits(edits: dict) -> dict:
     from agent import tracker
     if not isinstance(edits, dict):
         raise ValueError("bad edits")
-    with tracker.LOCK:
+    with tracker.locked(DATA / "tracker.csv"):            # also blocks the scheduled search (separate process) meanwhile
         rows = tracker_rows()
         n = 0
+        today = datetime.now().date().isoformat()
         for r in rows:
             e = edits.get(r.get("url"))
             if not isinstance(e, dict):
                 continue
             for k, v in e.items():
                 if k in EDITABLE and isinstance(v, str) and len(v) <= 2000 and (k != "status" or v in STATUSES):
-                    r[k] = v
-                    n += 1
-        tracker_write(rows, locked=True)
+                    if r.get(k, "") != v:
+                        r[k] = v
+                        r["touched"] = today
+                        n += 1
+        if n:
+            tracker_write(rows, locked=True)
     return {"ok": True, "changed": n}
 
 

@@ -214,6 +214,32 @@ def country_weight(profile: dict, name: str):
     return cfg.get("weight", 1.0) if isinstance(cfg, dict) else float(cfg)
 
 
+# ------------------------------------------------------------------ the same job seen on two sites
+_CO_SUFFIX = re.compile(r"\b(corporation|corp|incorporated|inc|llc|l l c|ltd|limited|co|company|group|wll|w l l|pty|plc|pjsc|psc|llp|"
+                        r"gmbh|holding|holdings|international|global|in the middle east|middle east|in canada|canada|australia|uae|ksa|"
+                        r"saudi arabia|qatar|kuwait|oman)\b")
+
+
+def norm_company(c: str) -> str:
+    c = re.sub(r"[^\w\s&]", " ", (c or "").lower())
+    return re.sub(r"\s+", " ", _CO_SUFFIX.sub(" ", c)).strip()
+
+
+def same_job_key(j: dict) -> str:
+    """Title + company + country, written loosely ('Parsons Corporation' = 'Parsons'): the same posting on LinkedIn, SEEK
+    and the employer's own site. Empty when the company is unknown (then only the link identifies a job)."""
+    co = norm_company(j.get("company", ""))
+    if not co or co == "unknown" or co == "private advertiser":
+        return ""
+    t = re.sub(r"\s+", " ", re.sub(r"[^\w\s/&+]", " ", (j.get("title") or "").lower())).strip()
+    return f"tcc:{t}|{co}|{j.get('country') or ''}"
+
+
+def is_known(j: dict) -> bool:
+    k = same_job_key(j)
+    return dedupe_key(j) in KNOWN or bool(k and k in KNOWN)
+
+
 # Incremental searching (set by main): only ads posted in the last WINDOW_DAYS days are asked for (None = each source's
 # own default, i.e. a full search), and KNOWN holds the jobs already in your list so paging can stop when nothing is new.
 WINDOW_DAYS: int | None = None

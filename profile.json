@@ -238,7 +238,40 @@
     "rpeq": -45,
     "cpeng": -45,
     "registered professional engineer": -45,
-    "professional engineer": -30
+    "professional engineer": -30,
+    "i&c": -50,
+    "automation": -40,
+    "automated": -40,
+    "controls engineer": -40,
+    "telecom": -50,
+    "telecommunications": -50,
+    "fiber": -30,
+    "fibre": -30,
+    "signalling": -30,
+    "signaling": -30,
+    "packing": -50,
+    "packaging": -50,
+    "food": -40,
+    "pharmaceutical": -50,
+    "pharma": -50,
+    "biomedical": -60,
+    "medical": -30,
+    "semiconductor": -60,
+    "embedded": -80,
+    "firmware": -80,
+    "automotive": -40,
+    "aerospace": -40,
+    "avionics": -60,
+    "nitrogen": -40,
+    "commissioning": -25,
+    "bms": -50,
+    "elv": -50,
+    "fire alarm": -50,
+    "elevator": -60,
+    "substation": -40,
+    "protection engineer": -50,
+    "rf engineer": -80,
+    "network planning": -60
   },
   "keyword_points": {
     "water network": 12,
@@ -970,10 +1003,12 @@
     "saudi national": "\\bgcc\\b|\\bbahraini?\\b",
     "saudis only": "\\bgcc\\b|\\bbahraini?\\b",
     "emirati": "\\bgcc\\b|\\bbahraini?\\b",
-    "qatari national": "\\bgcc\\b|\\bbahraini?\\b"
+    "qatari national": "\\bgcc\\b|\\bbahraini?\\b",
+    "automation": "\\bbuilding information|\\bbim\\b",
+    "commissioning": "\\bcivil\\b|\\bwater\\b|\\bpipeline\\b"
   },
   "work_rights": {
-    "_comment": "Outside the GCC: 'reject' = you can't legally take the job without citizenship/PR/clearance; 'penalty' = boilerplate that usually means no sponsorship.",
+    "_comment": "Outside the GCC: 'reject' = you can't legally take the job without citizenship/PR/clearance; 'penalty' = boilerplate that usually means no sponsorship; visa_needed = the job goes to Review unless the ad shows the employer sponsors visas (sponsor_signals) - set it to false if you get a work permit or PR there.",
     "Australia": {
       "reject": [
         "\\baustralian citizens?(hip)?\\b(?![^.;\\n]{0,30}\\bor\\b[^.;\\n]{0,30}\\bvisa)",
@@ -985,7 +1020,23 @@
       "penalty": [
         "\\bright to work in australia\\b|\\bwork(?:ing)? rights\\b|\\bno (?:visa )?sponsorship\\b|\\bunable to sponsor\\b|\\bnot (?:able|offering) to sponsor\\b",
         "\\b(?:rpeq|cpeng)\\b(?![^.;\\n]{0,40}\\b(?:eligib\\w*|working towards))"
-      ]
+      ],
+      "visa_needed": true,
+      "sponsor_signals": [
+        "\\bvisa sponsorship\\b(?![^.;\\n]{0,20}\\b(?:is )?not\\b)",
+        "\\b(?:can|will|able to|happy to|willing to)\\s+sponsor\\b",
+        "\\bsponsorship (?:is |may be )?(?:available|provided|offered|considered)\\b",
+        "\\b(?:482|186|494|tss|dama|skilled)\\s+visa\\b",
+        "\\blmia\\b",
+        "\\btemporary foreign workers?\\b",
+        "\\b(?:international|overseas|foreign) (?:candidates|applicants|workers)\\b(?![^.;\\n]{0,30}\\b(?:not|cannot|won't)\\b)",
+        "\\brelocation (?:support|assistance|package|allowance)\\b",
+        "\\bwork permit (?:support|assistance|sponsorship)\\b",
+        "\\bglobal talent\\b",
+        "\\bemployer[- ]sponsored\\b",
+        "\\bwe sponsor\\b"
+      ],
+      "no_sponsor": "\\bno (?:visa )?sponsorship\\b|\\b(?:unable|not able|cannot|can't|won't|will not|not offering)\\s+(?:to\\s+)?(?:provide\\s+)?sponsor|\\bsponsorship (?:is )?not (?:available|provided|offered)\\b|\\bwithout (?:the need for )?(?:visa )?sponsorship\\b"
     },
     "Canada": {
       "reject": [
@@ -996,10 +1047,26 @@
       "penalty": [
         "\\b(?:legally )?(?:eligible|entitled|authori[sz]ed) to work in canada\\b|\\bno (?:visa )?sponsorship\\b|\\bunable to sponsor\\b|\\bnot (?:able|offering) to sponsor\\b",
         "\\bp\\.?\\s?eng\\.?\\b(?![^.;\\n]{0,50}\\b(?:eligib\\w*|eit|in training|working towards|or equivalent))"
-      ]
+      ],
+      "visa_needed": true,
+      "sponsor_signals": [
+        "\\bvisa sponsorship\\b(?![^.;\\n]{0,20}\\b(?:is )?not\\b)",
+        "\\b(?:can|will|able to|happy to|willing to)\\s+sponsor\\b",
+        "\\bsponsorship (?:is |may be )?(?:available|provided|offered|considered)\\b",
+        "\\b(?:482|186|494|tss|dama|skilled)\\s+visa\\b",
+        "\\blmia\\b",
+        "\\btemporary foreign workers?\\b",
+        "\\b(?:international|overseas|foreign) (?:candidates|applicants|workers)\\b(?![^.;\\n]{0,30}\\b(?:not|cannot|won't)\\b)",
+        "\\brelocation (?:support|assistance|package|allowance)\\b",
+        "\\bwork permit (?:support|assistance|sponsorship)\\b",
+        "\\bglobal talent\\b",
+        "\\bemployer[- ]sponsored\\b",
+        "\\bwe sponsor\\b"
+      ],
+      "no_sponsor": "\\bno (?:visa )?sponsorship\\b|\\b(?:unable|not able|cannot|can't|won't|will not|not offering)\\s+(?:to\\s+)?(?:provide\\s+)?sponsor|\\bsponsorship (?:is )?not (?:available|provided|offered)\\b|\\bwithout (?:the need for )?(?:visa )?sponsorship\\b"
     }
   },
-  "_rules_version": 6,
+  "_rules_version": 7,
   "_rules_comment": "Rule lists (rejects, penalties, sectors, work rights, screening answers, category rules) are maintained by the program and refreshed when it updates. Your facts, countries, queries and minimum scores are yours.",
   "ai_facts": {
     "work_status": "GCC national (Bahraini): does not need visa sponsorship to work in other GCC countries; would need employer visa sponsorship for Canada or Australia and does not hold their citizenship or permanent residence."
@@ -1009,5 +1076,27 @@
     "senior": "\\b(senior|sr\\.?|lead|principal|manager|head|director|chief|superintendent)\\b",
     "starter": "\\b(fresh(er)?|graduate|trainee|junior|jr\\.?|intern(ship)?|entry[- ]level|apprentice|0\\s*(-|to)\\s*[12]\\s*(years|yrs))\\b",
     "support": "\\b(technician|inspector|supervisor|foreman|draftsman|draughtsman|operator|assistant|coordinator)\\b"
+  },
+  "generic_titles": {
+    "_comment": "Titles used in every industry. They count as civil only when the title, company or ad shows construction / infrastructure work; otherwise they go to Review.",
+    "titles": [
+      "project engineer",
+      "field engineer",
+      "maintenance engineer",
+      "quality engineer",
+      "qc engineer",
+      "assistant engineer",
+      "graduate engineer",
+      "trainee engineer",
+      "engineer in training",
+      "junior engineer",
+      "operations engineer",
+      "project coordinator",
+      "document controller",
+      "planning engineer",
+      "cost engineer",
+      "estimator"
+    ],
+    "context": "\\b(civil|construction|constructions|contracting|contractors?|infrastructure|roads?|highways?|bridges?|utilit(y|ies)|water|wastewater|sewer(age)?|drainage|stormwater|storm water|pipelines?|earthworks?|concrete|structural|buildings?|fit-?out|asphalt|pavements?|airport|airfield|metro|tunnel(l)?ing|marine works|ports?|municipal(ity)?|land development|subdivision|geotechnical|surveying|epc|qa/?qc|formwork|excavation|reinforcement|real estate|developer|property|precast|ready-?mix|quarry|dredging|landscape|irrigation|district cooling|substructure|superstructure)\\b"
   }
 }

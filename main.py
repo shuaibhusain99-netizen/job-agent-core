@@ -48,7 +48,8 @@ def main() -> int:
     # 1. search - only what's new since the last search, with a full search every few days
     known = tracker.load(TRACKER)
     seen_before = _load_seen()
-    util.KNOWN = {dedupe_key(r) for r in known.values()} | set(seen_before)
+    util.KNOWN = {dedupe_key(r) for r in known.values()} | {util.same_job_key(r) for r in known.values()} | set(seen_before)
+    util.KNOWN.discard("")
     full, sig = plan_search(args.full)
     log("Full search (all recent ads)" if not util.WINDOW_DAYS else
         f"Quick search: ads from the last {util.WINDOW_DAYS} days (a full search runs every {full_every()} days)")
@@ -61,8 +62,7 @@ def main() -> int:
             continue
         # the same title at the same company in the same country is one job, wherever it was found:
         # keep the first one seen, but take the fuller ad text from the copy that has it (no need to fetch it again)
-        tcc = "|".join([j["title"].lower().strip(), j["company"].lower().strip(), j.get("country") or j["location"].lower()]) \
-            if j["company"] != "Unknown" else ""
+        tcc = util.same_job_key(j)
         first = unique.get(k) or (unique.get(by_tcc[tcc]) if tcc in by_tcc else None)
         if first is None:
             unique[k] = j
@@ -81,7 +81,17 @@ def main() -> int:
     n = tracker.retag_old_rows(known, PROFILE)
     if n:
         log(f"Re-tagged {n} rows saved by an older version")
+    n = tracker.reopen_after_rule_changes(known, PROFILE, details.load)
+    if n:
+        log(f"Re-opened {n} jobs that older rules had skipped (they're in Review)")
+    n = tracker.merge_duplicates(known)
+    if n:
+        log(f"Merged {n} duplicate jobs (the same ad from two sites)")
     known_key = {dedupe_key(r): u for u, r in known.items()}
+    for u, r in known.items():                      # the same job saved earlier from another site counts as known too
+        sk = util.same_job_key(r)
+        if sk:
+            known_key.setdefault(sk, u)
     for r in tracker.sweep_titles(known, PROFILE):
         drop_pack(r)
     swept = sum(1 for r in known.values() if (r.get("notes") or "").startswith("auto: title"))
@@ -94,7 +104,7 @@ def main() -> int:
     for j in jobs:
         j["match_score"], j["verdict"], r = score(j, PROFILE)
         j["reasons"] = "; ".join(r)
-        j["_known"] = known_key.get(dedupe_key(j))
+        j["_known"] = known_key.get(dedupe_key(j)) or known_key.get(util.same_job_key(j) or "-")
     jobs.sort(key=lambda j: -j["match_score"])
     want = []
     week_ago = (date.today() - timedelta(days=7)).isoformat()
@@ -103,7 +113,7 @@ def main() -> int:
             continue
         if j["_known"]:
             row = known[j["_known"]]
-            if not tracker._untouched(row) or tracker._known_len(row) >= 400:
+            if not tracker.rejudgeable(row) or tracker._known_len(row) >= 400:
                 continue
             if details.load(j["url"]).get("tried", "") >= week_ago:
                 continue                        # its full ad couldn't be read in the last week: don't ask again daily
@@ -126,7 +136,7 @@ def main() -> int:
     keys = load_keys()
     if ai.settings(keys):
         ai.USAGE = ROOT / "ai_usage.json"
-        cand = [j for j in jobs if j["verdict"] != "reject" and (not j["_known"] or tracker._untouched(known[j["_known"]]))]
+        cand = [j for j in jobs if j["verdict"] != "reject" and (not j["_known"] or tracker.rejudgeable(known[j["_known"]]))]
         ai.review_many(cand, PROFILE, keys, cache_get=lambda u: details.load(u).get("ai") or {},
                        cache_put=lambda u, r: details.save(u, {"ai": r}))
         for j in cand:
@@ -257,6 +267,7 @@ def _save_seen(seen: dict, unique: dict) -> None:
     cut = (date.today() - timedelta(days=30)).isoformat()
     keep = {k: v for k, v in seen.items() if isinstance(v, str) and v >= cut}
     keep.update({k: today for k in unique})
+    keep.update({util.same_job_key(j): today for j in unique.values() if util.same_job_key(j)})
     try:
         tracker.atomic_write(ROOT / "seen.json", json.dumps(keep, separators=(",", ":")))
     except OSError:

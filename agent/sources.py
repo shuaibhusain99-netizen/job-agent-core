@@ -193,7 +193,7 @@ def fetch_linkedin(cfg: dict, profile: dict) -> list[dict]:
                         continue
                     seen.add(k)
                     new += 1
-                    unknown += k not in util.KNOWN
+                    unknown += not util.is_known(j)
                     out.append(j)
                     country_hits += 1
                 time.sleep(1.0)

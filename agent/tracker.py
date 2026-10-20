@@ -16,8 +16,8 @@ from .util import log
 
 FIELDS = ["found_date", "score", "verdict", "title", "company", "location", "country", "source",
           "url", "status", "applied_date", "notes", "pack_file", "user_notes", "category", "sector", "salary", "apply_email",
-          "posted", "desc_len", "level", "ai_fit", "ai_summary"]
-USER_FIELDS = ("status", "applied_date", "user_notes")
+          "posted", "desc_len", "level", "ai_fit", "ai_summary", "touched"]
+USER_FIELDS = ("status", "applied_date", "user_notes", "touched")     # touched = the day you last changed it in the app
 OPEN = ("New", "Review")
 
 LOCK = threading.RLock()
@@ -181,6 +181,17 @@ def _untouched(row: dict) -> bool:
     return row.get("status") in OPEN and not (row.get("user_notes") or "").strip()
 
 
+def auto_skipped(row: dict) -> bool:
+    """Skipped by the agent (not by you): it may be re-judged when the rules or the ad change."""
+    return (row.get("status") == "Skipped" and (row.get("notes") or "").startswith("auto:")
+            and not (row.get("touched") or row.get("user_notes") or row.get("applied_date") or "").strip())
+
+
+def rejudgeable(row: dict) -> bool:
+    """Rows the agent may re-score: open rows you haven't written on, and rows it skipped itself."""
+    return _untouched(row) or auto_skipped(row)
+
+
 def _known_len(row: dict) -> int:
     if (row.get("desc_len") or "").strip():
         return _int(row["desc_len"])
@@ -197,7 +208,7 @@ def refresh(row: dict, j: dict, apply_countries: list[str] | None = None) -> str
         if v and not row.get(k):
             row[k] = v
             changed = "updated"
-    if not _untouched(row):
+    if not rejudgeable(row):
         return changed
     new_len = len(j.get("description", ""))
     if new_len < _known_len(row):
@@ -206,11 +217,13 @@ def refresh(row: dict, j: dict, apply_countries: list[str] | None = None) -> str
         row["desc_len"] = new_len                       # remember the full ad was read, so it isn't fetched again
         changed = "updated"
     if j["verdict"] == "reject":
-        row["status"], row["verdict"], row["notes"] = "Skipped", "reject", ("auto: " + j["reasons"])[:200]
-        row["desc_len"] = new_len
+        was = row.get("status")
+        row.update(status="Skipped", verdict="reject", notes=("auto: " + j["reasons"])[:200], score=j["match_score"],
+                   category=j.get("category", row.get("category", "")), sector=j.get("sector", ""), level=j.get("level", row.get("level", "")),
+                   desc_len=new_len)
         if j.get("ai"):
             row["ai_fit"], row["ai_summary"] = j["ai"].get("fit", ""), j["ai"].get("summary", "")[:200]
-        return "skipped"
+        return "skipped" if was != "Skipped" else changed
     status = "New" if j["verdict"] == "apply" else "Review"
     if status == "New" and apply_countries is not None and j.get("country") not in apply_countries:
         status = "Found (apply off)"
@@ -222,6 +235,59 @@ def refresh(row: dict, j: dict, apply_countries: list[str] | None = None) -> str
                    ai_summary=(j.get("ai") or {}).get("summary", row.get("ai_summary", ""))[:200])
         changed = "updated"
     return changed
+
+
+def reopen_after_rule_changes(rows: dict[str, dict], profile: dict, details_load=None) -> int:
+    """Rows the agent skipped only because an older rule set had no place for the title (e.g. 'Civil Inspector' before
+    the Site support list existed) are judged again with today's rules, using the saved ad text when there is one."""
+    from .score import score, _all_targets, _word, title_only_reject
+    import re
+    targets = _all_targets(profile)
+    n = 0
+    for r in rows.values():
+        if not auto_skipped(r) or "title not in category" not in (r.get("notes") or ""):
+            continue
+        t = (r.get("title") or "").lower()
+        if title_only_reject(t, profile) or not any(re.search(_word(x), t) for x in targets):
+            continue
+        d = (details_load(r["url"]) if details_load else {}) or {}
+        if len(d.get("description", "")) < 300 and _known_len(r) >= 400:
+            continue                    # it was judged on a full ad we no longer have: that verdict stands
+        j = {"title": r.get("title", ""), "company": r.get("company", ""), "location": r.get("location", ""),
+             "country": r.get("country", ""), "description": d.get("description", ""), "source": r.get("source", ""),
+             "url": r["url"], "posted": r.get("posted", "")}
+        s, v, why = score(j, profile)
+        if v == "reject":
+            r["notes"] = ("auto: " + "; ".join(why))[:200]          # same decision, but now with the real reason
+            r["score"] = s
+            continue
+        r.update(status="Review", verdict=v, score=s, category=j["category"], level=j.get("level", ""), sector=j.get("sector", ""),
+                 notes=("re-opened (rules updated): " + "; ".join(why))[:200])
+        n += 1
+    return n
+
+
+def merge_duplicates(rows: dict[str, dict]) -> int:
+    """The same job saved twice from different sites (title + company + country): keep one row - the one you acted on,
+    else the best-judged one - and drop the other copies, unless you acted on them too."""
+    from .util import same_job_key
+    groups: dict[str, list] = {}
+    for u, r in rows.items():
+        k = same_job_key(r)
+        if k:
+            groups.setdefault(k, []).append(u)
+    n = 0
+    for urls in groups.values():
+        if len(urls) < 2:
+            continue
+        mine = [u for u in urls if not (rejudgeable(rows[u]) or rows[u].get("status") == "Found (apply off)")]
+        rank = lambda u: (u in mine, rows[u].get("status") in OPEN, _int(rows[u].get("desc_len")), _int(rows[u].get("score")))
+        keep = max(urls, key=rank)
+        for u in urls:
+            if u != keep and u not in mine:
+                rows.pop(u, None)
+                n += 1
+    return n
 
 
 def sweep_titles(rows: dict[str, dict], profile: dict) -> list[dict]:
