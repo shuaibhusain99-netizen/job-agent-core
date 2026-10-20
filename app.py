@@ -25,8 +25,12 @@ HOME = Path(sys.executable).resolve().parent if FROZEN else Path(__file__).resol
 DATA = HOME / "data"
 PORT = 8765
 TOKEN = secrets.token_urlsafe(24)       # per-launch secret written into the page; every /api call must carry it
-PRIVATE_FILES = {"mail.json", "CV.pdf"}
+PRIVATE_FILES = {"mail.json", "cv.pdf", "keys.json"}          # never readable through /api/file (names compared in lower case)
 PRIVATE_DIRS = {"browser", "browser-search", "sent"}
+# /api/file is an allow-list: the only files the page reads, and the only ones it may write.
+PAGE_READS = {"tracker.csv", "profile.json", "sources.json", "runs.log"}
+PAGE_WRITES = {"profile.json", "sources.json"}
+JOOBLE_SITES = ("us", "sa", "ae", "qa", "kw", "om", "bh", "ca", "au")
 
 
 def ensure_data():
@@ -36,18 +40,38 @@ def ensure_data():
     for name in ("profile.json", "keys.json", "sources.json"):
         if not (DATA / name).exists():
             shutil.copy(BUNDLE / name, DATA / name)
-    upgrade_config()
+    new_rules = upgrade_config()
     if not (DATA / "tracker.csv").exists():
         tracker.write(DATA / "tracker.csv", {})
     else:
         try:                                         # one-time re-tag of rows from older versions (display tags only)
             with tracker.locked(DATA / "tracker.csv"):
-                rows = tracker.load(DATA / "tracker.csv")
+                rows = tracker.load_current(DATA / "tracker.csv")     # also adds results kept aside while Excel had it open
                 profile = json.loads((DATA / "profile.json").read_text(encoding="utf-8"))
-                if tracker.retag_old_rows(rows, profile):
+                changed = tracker.retag_old_rows(rows, profile)
+                if new_rules:
+                    changed = rejudge_after_rules_update(rows, profile) or changed
+                if changed:
                     tracker.write(DATA / "tracker.csv", rows)
         except Exception as e:  # noqa
-            print(f"job list re-tag skipped: {e}")
+            print(f"job list update skipped: {e}")
+
+
+def rejudge_after_rules_update(rows: dict, profile: dict) -> int:
+    """A new program version with better matching rules: the jobs the agent judged (not the ones you acted on) are judged
+    again on their saved ads right away, so the lists are right the moment the new version opens - not after a search."""
+    from agent import tracker
+    from agent.util import countries
+    det = _details()
+    tracker.backfill_from_notes(rows)
+    n = tracker.rescore_with_new_rules(rows, profile, det.load, countries(profile, "apply"))
+    n += tracker.reopen_after_rule_changes(rows, profile, det.load)
+    n += tracker.release_found(rows, countries(profile, "apply"))
+    n += len(tracker.merge_duplicates(rows))
+    n += len(tracker.sweep_titles(rows, profile))
+    if n:
+        print(f"New matching rules: {n} jobs in your list were judged again")
+    return n
 
 
 # Rule sets the program owns: replaced when a newer program version ships new rules (_rules_version goes up).
@@ -67,16 +91,23 @@ def _add_missing(dst: dict, src: dict) -> bool:
     return changed
 
 
-def upgrade_config():
-    """Bring the data folder's settings up to this program version - once per version, never undoing your own edits."""
+def upgrade_config() -> bool:
+    """Bring the data folder's settings up to this program version - once per version, never undoing your own edits.
+    True when the matching rules were updated."""
     from agent import tracker
+    upgraded = False
     try:
         user = json.loads((DATA / "profile.json").read_text(encoding="utf-8"))
         bundled = json.loads((BUNDLE / "profile.json").read_text(encoding="utf-8"))
         if int(user.get("_rules_version", 0)) < int(bundled.get("_rules_version", 0)):
+            mine_visa = {c: v.get("visa_needed") for c, v in (user.get("work_rights") or {}).items()
+                         if isinstance(v, dict) and "visa_needed" in v}
             for k in RULE_KEYS:
                 if k in bundled:
                     user[k] = bundled[k]
+            for c, v in mine_visa.items():                   # your own "I don't need a visa there" survives rule updates
+                if isinstance(user.get("work_rights", {}).get(c), dict):
+                    user["work_rights"][c]["visa_needed"] = v
             ucat = user.setdefault("categories", {})
             for name, cat in bundled.get("categories", {}).items():
                 if not isinstance(cat, dict):
@@ -94,6 +125,7 @@ def upgrade_config():
             _add_missing(user, bundled)                      # brand-new sections (e.g. form_answers)
             user["_rules_version"] = bundled["_rules_version"]
             tracker.atomic_write(DATA / "profile.json", json.dumps(user, indent=2, ensure_ascii=False) + "\n")
+            upgraded = True
     except Exception as e:  # noqa
         print(f"profile upgrade skipped: {e}")
     try:
@@ -111,6 +143,7 @@ def upgrade_config():
             tracker.atomic_write(DATA / "sources.json", json.dumps(bundled, indent=2, ensure_ascii=False) + "\n")
     except Exception as e:  # noqa
         print(f"sources upgrade skipped: {e}")
+    return upgraded
 
 
 # ----------------------------------------------------------------------------- agent run
@@ -199,23 +232,68 @@ def run_agent(block: bool = False, full: bool = False) -> bool:
 TASK = "JobAgentDaily"
 
 
+def _task_xml(command: str, args: str, hour: int) -> str:
+    """A daily task that also runs when the PC was off or asleep at that time (as soon as it is available), on battery
+    too, and is stopped if a search ever runs longer than 2 hours."""
+    from xml.sax.saxutils import escape
+    return f"""<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo><Description>Job Agent daily job search</Description></RegistrationInfo>
+  <Triggers><CalendarTrigger><StartBoundary>2026-01-01T{hour:02d}:00:00</StartBoundary><Enabled>true</Enabled>
+    <ScheduleByDay><DaysInterval>1</DaysInterval></ScheduleByDay></CalendarTrigger></Triggers>
+  <Principals><Principal id="Author"><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals>
+  <Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>true</RunOnlyIfNetworkAvailable><ExecutionTimeLimit>PT2H</ExecutionTimeLimit><Enabled>true</Enabled></Settings>
+  <Actions Context="Author"><Exec><Command>{escape(command)}</Command><Arguments>{escape(args)}</Arguments></Exec></Actions>
+</Task>"""
+
+
+_SCHED = {"at": 0.0, "on": False}
+
+
 def schedule(enable: bool, hour: int = 7) -> str:
     if os.name != "nt":
         return "Scheduling is available on Windows only."
-    exe = sys.executable if FROZEN else f'"{sys.executable}" "{Path(__file__).resolve()}"'
-    if enable:
-        cmd = ["schtasks", "/Create", "/F", "/SC", "DAILY", "/TN", TASK, "/ST", f"{hour:02d}:00", "/TR", f'"{exe}" --run' if FROZEN else f"{exe} --run"]
-    else:
-        cmd = ["schtasks", "/Delete", "/F", "/TN", TASK]
-    r = subprocess.run(cmd, capture_output=True, text=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    _SCHED["at"] = 0.0
+    if not enable:
+        r = subprocess.run(["schtasks", "/Delete", "/F", "/TN", TASK], capture_output=True, text=True, creationflags=flags)
+        return (r.stdout or r.stderr).strip()
+    command, args = (sys.executable, "--run") if FROZEN else (sys.executable, f'"{Path(__file__).resolve()}" --run')
+    xml = DATA / "schedule-task.xml"
+    try:
+        xml.write_text(_task_xml(command, args, hour), encoding="utf-16")
+        r = subprocess.run(["schtasks", "/Create", "/F", "/TN", TASK, "/XML", str(xml)], capture_output=True, text=True, creationflags=flags)
+    finally:
+        xml.unlink(missing_ok=True)
+    if r.returncode != 0:                       # older Windows: the plain daily task (runs only if the PC is on at that time)
+        tr = f'"{command}" {args}'
+        r = subprocess.run(["schtasks", "/Create", "/F", "/SC", "DAILY", "/TN", TASK, "/ST", f"{hour:02d}:00", "/TR", tr],
+                           capture_output=True, text=True, creationflags=flags)
+    if r.returncode == 0:
+        try:
+            (DATA / "schedule.json").write_text(json.dumps({"hour": hour}), encoding="utf-8")
+        except OSError:
+            pass
     return (r.stdout or r.stderr).strip()
 
 
 def schedule_status() -> bool:
+    """Is the daily task set up? (Checked at most once a minute.)"""
     if os.name != "nt":
         return False
-    r = subprocess.run(["schtasks", "/Query", "/TN", TASK], capture_output=True, text=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-    return r.returncode == 0
+    if time.time() - _SCHED["at"] > 60:
+        r = subprocess.run(["schtasks", "/Query", "/TN", TASK], capture_output=True, text=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        _SCHED.update(at=time.time(), on=r.returncode == 0)
+    return _SCHED["on"]
+
+
+def schedule_hour() -> int:
+    try:
+        return int(json.loads((DATA / "schedule.json").read_text(encoding="utf-8")).get("hour", 7))
+    except Exception:
+        return 7
 
 
 # ----------------------------------------------------------------------------- e-mail applications
@@ -289,6 +367,12 @@ def smtp_connect(m: dict):
 def tracker_rows() -> list[dict]:
     from agent import tracker
     return list(tracker.load(DATA / "tracker.csv").values())
+
+
+def tracker_rows_current() -> list[dict]:
+    """The list including results waiting in tracker.pending.csv (caller holds the tracker lock)."""
+    from agent import tracker
+    return list(tracker.load_current(DATA / "tracker.csv").values())
 
 
 def tracker_write(rows: list[dict], locked: bool = False):
@@ -365,7 +449,7 @@ def send_application(url: str, to: str, subject: str, body: str) -> dict:
     (sent / f"{stamp}_{safe}.eml").write_bytes(bytes(msg))     # your own copy; sent/ is never served to the page
     from agent import tracker
     with tracker.locked(DATA / "tracker.csv"):
-        rows = tracker_rows()
+        rows = tracker_rows_current()
         for r in rows:
             if r.get("url") == url:
                 r["status"] = "Applied"; r["applied_date"] = r.get("applied_date") or datetime.now().date().isoformat()
@@ -406,7 +490,7 @@ def apply_on_site(url: str) -> dict:
 def mark_status(url: str, status: str) -> dict:
     from agent import tracker
     with tracker.locked(DATA / "tracker.csv"):            # also blocks the scheduled search (separate process) meanwhile
-        rows = tracker_rows()
+        rows = tracker_rows_current()
         hit = False
         for r in rows:
             if r.get("url") == url:
@@ -430,7 +514,7 @@ def apply_edits(edits: dict) -> dict:
     if not isinstance(edits, dict):
         raise ValueError("bad edits")
     with tracker.locked(DATA / "tracker.csv"):            # also blocks the scheduled search (separate process) meanwhile
-        rows = tracker_rows()
+        rows = tracker_rows_current()
         n = 0
         today = datetime.now().date().isoformat()
         for r in rows:
@@ -445,6 +529,9 @@ def apply_edits(edits: dict) -> dict:
                         n += 1
         if n:
             tracker_write(rows, locked=True)
+        missing = set(edits) - {r.get("url") for r in rows}
+    if missing and not n:              # e.g. a search merged the job with the same ad from another site meanwhile
+        return {"ok": False, "changed": 0, "error": "this job is no longer in the list - press F5 to reload"}
     return {"ok": True, "changed": n}
 
 
@@ -473,6 +560,7 @@ MAX_BODY = 25 * 1024 * 1024          # the CV upload is the biggest request
 
 class Handler(BaseHTTPRequestHandler):
     timeout = 60                      # a stalled client can't hold a thread forever
+    _nonce = ""
 
     def log_message(self, *a):  # quiet
         pass
@@ -485,8 +573,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
         if ctype.startswith("text/html"):
-            self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
-                             "img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
+            self.send_header("Content-Security-Policy", f"default-src 'self'; script-src 'nonce-{self._nonce}'; style-src 'self' 'unsafe-inline'; "
+                             "img-src 'self' data:; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
             self.send_header("X-Frame-Options", "DENY")
         self.end_headers()
         self.wfile.write(body)
@@ -494,17 +582,14 @@ class Handler(BaseHTTPRequestHandler):
     def _json(self, obj, code=200):
         self._send(code, json.dumps(obj, ensure_ascii=False).encode())
 
-    def _safe(self, rel: str) -> Path | None:
-        """Files the page may read/write: text files in the data folder, never the mail password, CV, sent mail or browser profile."""
-        try:
-            p = (DATA / rel).resolve()
-        except (OSError, ValueError):
+    def _safe(self, rel: str, write: bool = False) -> Path | None:
+        """The page may read the job list, settings and search history, and write only the two settings files - by exact
+        name, in the data folder itself. Everything else (mail password, keys, CV, sent mail, browser profiles) is off limits."""
+        name = (rel or "").strip()
+        if name not in (PAGE_WRITES if write else PAGE_READS):
             return None
-        root = DATA.resolve()
-        if not p.is_relative_to(root) or p == root:
-            return None
-        parts = p.relative_to(root).parts
-        if parts[0] in PRIVATE_DIRS or p.name in PRIVATE_FILES or p.suffix.lower() not in (".json", ".csv", ".md", ".txt", ".log"):
+        p = DATA / name
+        if p.is_symlink():
             return None
         return p
 
@@ -563,19 +648,36 @@ class Handler(BaseHTTPRequestHandler):
 
     def _get(self, u, q):
         if u.path in ("/", "/index.html"):
+            self._nonce = secrets.token_urlsafe(18)    # only the app's own script may run on the page, even if a bug let markup in
             html = (BUNDLE / "panel_local.html").read_text(encoding="utf-8").replace("__JOBAGENT_TOKEN__", TOKEN)
+            html = html.replace("<script>", f'<script nonce="{self._nonce}">', 1)
             return self._send(200, html.encode("utf-8"), "text/html; charset=utf-8")
         if u.path == "/api/file":
             p = self._safe(q.get("path", [""])[0])
             if not p or not p.exists():
                 return self._json({"error": "not found"}, 404)
-            return self._json({"text": p.read_text(encoding="utf-8")})
+            if p.name == "tracker.csv":
+                # the list as the app reads it - also after Excel re-saved it (other encoding, ";" separator, dd/mm dates),
+                # with results still waiting while Excel has it open
+                from agent import tracker
+                try:
+                    with tracker.locked(p):
+                        rows = tracker.load_current(p)
+                except tracker.Unreadable as e:
+                    return self._json({"error": str(e)}, 500)
+                return self._json({"text": tracker.to_csv(rows)})
+            return self._json({"text": p.read_text(encoding="utf-8", errors="replace")})
         if u.path == "/api/status":
             runs = []
             if (DATA / "runs.log").exists():
                 runs = [l.split("\t", 1) for l in (DATA / "runs.log").read_text(encoding="utf-8").splitlines()[-8:] if "\t" in l]
-            return self._json({"running": STATE["running"], "log": STATE["log"][-6:], "summary": STATE["summary"], "started": STATE["started"],
-                               "runs": [{"at": a, "summary": b} for a, b in reversed(runs)], "scheduled": schedule_status(), "data_dir": str(DATA)})
+            lock = DATA / RUN_LOCK
+            elsewhere = not STATE["running"] and lock.exists() and time.time() - lock.stat().st_mtime < 3 * 3600
+            return self._json({"running": STATE["running"] or elsewhere, "elsewhere": elsewhere,
+                               "log": STATE["log"][-6:] if not elsewhere else ["The daily search is running in the background"],
+                               "summary": STATE["summary"], "started": STATE["started"],
+                               "runs": [{"at": a, "summary": b} for a, b in reversed(runs)], "scheduled": schedule_status(),
+                               "schedule_hour": schedule_hour(), "data_dir": str(DATA)})
         if u.path == "/api/mail":
             return self._json(mail_public())
         if u.path == "/api/apply-status":
@@ -597,6 +699,9 @@ class Handler(BaseHTTPRequestHandler):
             if a.get("api_key"):
                 a["api_key"] = "••••" + a["api_key"][-4:]
             return self._json({"settings": a, "active": bool(ai.settings(k)), "used_today": _ai_usage()})
+        if u.path == "/api/keys":            # which keys are saved - never the keys themselves
+            jo = _keys().get("jooble") or {}
+            return self._json({"jooble": {cc: bool(str(jo.get(cc) or "").strip()) for cc in JOOBLE_SITES}})
         if u.path == "/api/draft":
             url = q.get("url", [""])[0]
             row = next((r for r in tracker_rows() if r.get("url") == url), None)
@@ -608,11 +713,9 @@ class Handler(BaseHTTPRequestHandler):
     def _post(self, u, q, d):
         from agent import tracker
         if u.path == "/api/file":
-            p = self._safe(q.get("path", [""])[0])
+            p = self._safe(q.get("path", [""])[0], write=True)
             if not p:
-                return self._json({"error": "bad path"}, 400)
-            if p.name == "tracker.csv":
-                return self._json({"error": "use /api/edits for the job list"}, 400)
+                return self._json({"error": "this file can't be changed from the page (the job list changes through /api/edits)"}, 400)
             p.parent.mkdir(parents=True, exist_ok=True)
             text = d.get("text", "")
             if p.suffix == ".json":
@@ -628,17 +731,32 @@ class Handler(BaseHTTPRequestHandler):
             started = run_agent(full=bool(d.get("full")))
             return self._json({"ok": started, "error": "" if started else "A search is already running."})
         if u.path == "/api/schedule":
-            hour = int(d.get("hour", 7))
+            try:
+                hour = int(d.get("hour", 7))
+            except (TypeError, ValueError):
+                hour = -1
             if not 0 <= hour <= 23:
                 return self._json({"error": "hour must be 0-23"}, 400)
             return self._json({"ok": True, "message": schedule(bool(d.get("enable")), hour), "scheduled": schedule_status()})
         if u.path == "/api/mail":
             m = mail_settings()
+            before = (m.get("preset"), m.get("smtp_host"), m.get("smtp_port"), m.get("user"))
             for k in ("preset", "smtp_host", "user", "from_name"):
                 if k in d:
                     m[k] = str(d[k])[:200].strip()
             if "smtp_port" in d:
-                m["smtp_port"] = int(d["smtp_port"] or 587)
+                try:
+                    m["smtp_port"] = int(d["smtp_port"] or 587)
+                except (TypeError, ValueError):
+                    return self._json({"ok": False, "error": "the port must be a number"}, 400)
+                if not 1 <= m["smtp_port"] <= 65535:
+                    return self._json({"ok": False, "error": "the port must be 1-65535"}, 400)
+            if m.get("user") and not EMAIL_OK.fullmatch(m["user"]):
+                return self._json({"ok": False, "error": "your e-mail address doesn't look right"}, 400)
+            if m.get("smtp_host") and not re.fullmatch(r"[A-Za-z0-9.-]{1,253}", m["smtp_host"]):
+                return self._json({"ok": False, "error": "the mail server name doesn't look right"}, 400)
+            if before != (m.get("preset"), m.get("smtp_host"), m.get("smtp_port"), m.get("user")) and not d.get("password"):
+                m.pop("password", None)                # a saved password only ever goes to the server it was saved for
             if "cc_self" in d:
                 m["cc_self"] = bool(d["cc_self"])
             if d.get("password"):
@@ -673,19 +791,47 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(apply_on_site(str(d["url"])))
             except Exception as e:
                 return self._json({"ok": False, "error": f"{type(e).__name__}: {e}"})
+        if u.path == "/api/keys":            # Jooble keys only; an empty value removes one
+            k = _keys()
+            jo = k.setdefault("jooble", {})
+            for cc, v in (d.get("jooble") or {}).items():
+                v = str(v or "").strip()
+                if cc not in JOOBLE_SITES or len(v) > 100 or (v and not re.fullmatch(r"[A-Za-z0-9-]+", v)):
+                    return self._json({"ok": False, "error": f"that doesn't look like a Jooble key ({cc})"}, 400)
+                jo[cc] = v
+            tracker.atomic_write(DATA / "keys.json", json.dumps(k, indent=2))
+            return self._json({"ok": True})
         if u.path == "/api/ai":
             from agent import ai
             k = _keys()
             a = k.setdefault("ai", {})
-            for f in ("enabled", "provider", "model", "base_url", "max_per_run"):
-                if f in d:
-                    a[f] = d[f]
+            if "enabled" in d:
+                a["enabled"] = bool(d["enabled"])
+            if "provider" in d:
+                if d["provider"] not in ai.PROVIDERS:
+                    return self._json({"ok": False, "error": "unknown provider"}, 400)
+                if d["provider"] != a.get("provider"):
+                    a.pop("base_url", None)            # each provider uses its own fixed address
+                a["provider"] = d["provider"]
+            if "model" in d:
+                m = str(d["model"] or "").strip()
+                if len(m) > 100 or (m and not re.fullmatch(r"[\w.:/@+-]+", m)):
+                    return self._json({"ok": False, "error": "that model name doesn't look right"}, 400)
+                a["model"] = m
+            if "max_per_run" in d:
+                try:
+                    a["max_per_run"] = max(1, min(900, int(d["max_per_run"])))
+                except (TypeError, ValueError):
+                    return self._json({"ok": False, "error": "ads to read per search must be a number"}, 400)
             if d.get("api_key"):
-                a["api_key"] = str(d["api_key"]).strip()
-            if a.get("provider") and a["provider"] not in ai.PROVIDERS:
-                return self._json({"ok": False, "error": "unknown provider"}, 400)
+                key = str(d["api_key"]).strip()
+                if len(key) > 200 or not re.fullmatch(r"[\x21-\x7e]+", key):
+                    return self._json({"ok": False, "error": "that doesn't look like an API key"}, 400)
+                a["api_key"] = key
             tracker.atomic_write(DATA / "keys.json", json.dumps(k, indent=2))
-            return self._json({"ok": True})
+            return self._json({"ok": True, "active": bool(ai.settings(k)),
+                               "why_off": "" if ai.settings(k) or not a.get("enabled") else
+                               ("paste your Groq key to switch it on" if a.get("provider", "groq") == "groq" else "choose a provider")})
         if u.path == "/api/ai-test":
             from agent import ai
             s_ = ai.settings(_keys())
@@ -728,13 +874,37 @@ def _shutdown():
         pass
 
 
+class AppServer(ThreadingHTTPServer):
+    """At most 32 requests at a time: another program on this PC can't tie up the app by opening connections."""
+    daemon_threads = True
+
+    def __init__(self, *a, **kw):
+        self._slots = threading.BoundedSemaphore(32)
+        super().__init__(*a, **kw)
+
+    def process_request(self, request, client_address):
+        if not self._slots.acquire(blocking=False):
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except Exception:
+            self._slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._slots.release()
+
+
 def serve(open_browser=True):
     ensure_data()
     sys.path.insert(0, str(BUNDLE))
     import atexit
     atexit.register(_shutdown)
-    srv = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
-    srv.daemon_threads = True
+    srv = AppServer(("127.0.0.1", PORT), Handler)
     url = f"http://127.0.0.1:{PORT}/"
     if open_browser:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()

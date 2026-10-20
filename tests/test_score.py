@@ -92,6 +92,7 @@ class Matches(unittest.TestCase):
 
     def test_australia_without_sponsorship_is_review(self):
         self.assertVerdict(run("Site Engineer", "Seymour Whyte", "Brisbane QLD", "Australia", LONG), {"maybe"})
+        self.assertIn("needs a work visa", run("Site Engineer", "Seymour Whyte", "Brisbane QLD", "Australia", LONG)[3][:200])
         self.assertVerdict(run("Site Engineer", "Seymour Whyte", "Brisbane QLD", "Australia", LONG + " No visa sponsorship available."), {"maybe", "reject"})
 
     def test_australia_with_sponsorship_is_apply(self):
@@ -101,6 +102,51 @@ class Matches(unittest.TestCase):
     def test_country_switched_off(self):
         self.assertVerdict(run("Civil Engineer", "X", "Manama, Bahrain", "Bahrain"), {"reject"})
         self.assertVerdict(run("Civil Engineer", "X", "Cairo, Egypt", "Other"), {"reject"})
+
+
+class ReviewFindings(unittest.TestCase):
+    """Cases the independent reviews found on real ads."""
+    def v(self, *a, **k):
+        return run(*a, **k)[1]
+
+    def test_titles_written_differently_are_still_found(self):
+        self.assertNotEqual(self.v("QAQC Engineer - Civil", "Larsen & Toubro", "Riyadh", "Saudi Arabia"), "reject")
+        self.assertNotEqual(self.v("Drainage Engineer", "X", "Dubai", "United Arab Emirates"), "reject")
+        self.assertNotEqual(self.v("Site Engineers", "X Contracting", "Dubai", "United Arab Emirates"), "reject")
+        self.assertNotEqual(self.v("Project Engineer - Civil (Substation)", "Larsen & Toubro", "Riyadh", "Saudi Arabia"), "reject")
+
+    def test_years_asked_vs_company_history(self):
+        ad = ("Responsibilities\nInspect civil works on site\nRequirements\nBachelor in civil engineering + proven 10 years of experience "
+              "in civil inspection\nWe are a leading consultancy with offices worldwide")
+        self.assertEqual(self.v("Civil Inspector", "AECOM", "Riyadh", "Saudi Arabia", ad), "reject")
+        ad2 = "XYZ brings 12+ years of experience delivering roads in the Kingdom. We need a site engineer with 3-5 years of experience." + LONG
+        self.assertNotEqual(self.v("Site Engineer", "XYZ Contracting", "Riyadh", "Saudi Arabia", ad2), "reject")
+
+    def test_visa_wording(self):
+        for no in ("We are unable to offer visa sponsorship for this role.", "This role is not eligible for visa sponsorship.",
+                   "Applicants must hold a valid work visa. Relocation package offered.", "We offer an employer sponsored RRSP plan."):
+            self.assertNotEqual(self.v("Site Engineer", "X Constructions", "Brisbane QLD", "Australia", LONG + " " + no), "apply", no)
+
+    def test_nationality_and_gender_restricted_roles(self):
+        self.assertEqual(self.v("Saudi Civil Engineer", "X", "Riyadh", "Saudi Arabia"), "reject")
+        self.assertEqual(self.v("Female Civil Engineer", "X", "Kuwait City", "Kuwait"), "reject")
+        for ad in ("This position is for Saudi nationals.", "Must be a Saudi national.", "Emiratis only.", "This is an Emiratisation role.",
+                   "Saudization position.", "Female candidates only.", "We are looking for an Emirati Graduate Engineer."):
+            self.assertEqual(self.v("Civil Engineer", "X", "Dubai", "United Arab Emirates", ad + LONG), "reject", ad)
+        self.assertNotEqual(self.v("Civil Engineer - Saudi Aramco projects", "X Contracting", "Dhahran", "Saudi Arabia"), "reject")
+        self.assertNotEqual(self.v("Civil Engineer", "X", "Riyadh", "Saudi Arabia", "Saudi or GCC nationals preferred." + LONG), "reject")
+
+    def test_senior_words(self):
+        for t in ("Managing Quantity Surveyor", "Deputy Resident Engineer"):
+            self.assertNotEqual(self.v(t, "X", "Dubai", "United Arab Emirates", LONG), "apply", t)
+
+    def test_it_titles(self):
+        for t in ("Data Pipeline Engineer", "Infrastructure Engineer - Azure", "Network Infrastructure Engineer (VMware)"):
+            self.assertEqual(self.v(t, "X", "Dubai", "United Arab Emirates"), "reject", t)
+
+    def test_newspaper_page_with_several_positions(self):
+        ad = "Wanted for a Riyadh project: Civil Engineer with 4 years experience. Electrical Engineer - degree in electrical engineering."
+        self.assertNotEqual(self.v("Civil Engineer - Riyadh", "Unknown", "Saudi Arabia", "Saudi Arabia", ad, source="Gulf Job Paper"), "reject")
 
 
 class Extraction(unittest.TestCase):

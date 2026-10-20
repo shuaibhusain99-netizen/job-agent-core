@@ -1,12 +1,34 @@
 """Job fetchers. Every fetcher returns a list of job dicts (see util.job) and never raises."""
 from __future__ import annotations
-import html, json, os, re, time
+import html, json, os, random, re, time
 from urllib.parse import quote, quote_plus, urljoin
 from xml.etree import ElementTree as ET
 
 from pathlib import Path
-from .util import http, http_json, job, clean, log, guess_country, countries, window, dedupe_key
+from .util import http, http_json, job, clean, log, guess_country, countries, window
 from . import util
+
+
+def _per_board(boards: list, fn, workers: int = 5) -> list[dict]:
+    """Employers on different websites are read side by side; each website still gets one request at a time.
+    One employer's site failing never costs the others."""
+    from concurrent.futures import ThreadPoolExecutor
+    boards = [b for b in boards or [] if isinstance(b, dict)]
+    if not boards:
+        return []
+
+    def one(b):
+        try:
+            return fn(b) or []
+        except Exception as e:  # noqa - a broken site must not take the others with it
+            log(f"  {b.get('company', '?')}: stopped ({type(e).__name__}: {e})")
+            return []
+    with ThreadPoolExecutor(max_workers=max(1, min(workers, len(boards)))) as ex:
+        return [j for res in ex.map(one, boards) for j in res]
+
+
+def _quick() -> bool:
+    return bool(util.WINDOW_DAYS)
 from . import sitebrowse
 
 
@@ -153,22 +175,31 @@ def linkedin_groups(profile: dict, cfg: dict) -> list[tuple[str, int]]:
 
 
 def fetch_linkedin(cfg: dict, profile: dict) -> list[dict]:
+    """LinkedIn's public job search. Polite: a request budget per search, a random 1-2 s pause between requests, and a
+    full stop the moment LinkedIn asks to slow down (it is then left alone until its Retry-After has passed)."""
     if not cfg.get("enabled"):
         return []
     out, blocked_countries = [], 0
-    days = window(int(cfg.get("days", 14)))
+    full_days = int(cfg.get("days", 14))
+    days = window(full_days, "linkedin_guest")
     tpr = f"r{days * 86400}"
     groups = linkedin_groups(profile, cfg)
+    budget = int(cfg.get("max_requests", 220))
     requests = 0
     for country in countries(profile):
         country_hits, challenged, seen = 0, 0, set()
         for kw, max_pages in groups:
-            start, stale = 0, 0
-            for page in range(max_pages):
+            start = 0
+            for _ in range(max_pages):
+                if requests >= budget:
+                    break
                 url = ("https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?"
                        f"keywords={quote_plus(kw)}&location={quote_plus(country)}&f_TPR={tpr}&start={start}")
                 status, body = http(url)
                 requests += 1
+                if status == 429:
+                    log(f"LinkedIn asked to slow down - stopped for this search ({len(out)} jobs so far)")
+                    return out
                 if status == 200 and "base-card" not in body:
                     break                                   # no (more) results
                 if status != 200:
@@ -176,36 +207,38 @@ def fetch_linkedin(cfg: dict, profile: dict) -> list[dict]:
                     time.sleep(3)
                     break
                 cards = re.findall(r"<li>[\s\S]*?</li>", body)
-                new = unknown = 0
+                new = 0
                 for card in cards:
-                    t = re.search(r'base-search-card__title">\s*([^<]+)', card)
-                    c = re.search(r'class="hidden-nested-link"[^>]*>\s*([^<]+)', card)
-                    l = re.search(r'job-search-card__location">\s*([^<]+)', card)
-                    u = re.search(r'href="(https://[^"?]+)', card)
-                    d = re.search(r'datetime="([^"]+)"', card)
-                    if not (t and u):
+                    try:
+                        t = re.search(r'base-search-card__title">\s*([^<]+)', card)
+                        c = re.search(r'class="hidden-nested-link"[^>]*>\s*([^<]+)', card)
+                        l = re.search(r'job-search-card__location">\s*([^<]+)', card)
+                        u = re.search(r'href="(https://[^"?]+)', card)
+                        d = re.search(r'datetime="([^"]+)"', card)
+                        if not (t and u):
+                            continue
+                        loc = l.group(1) if l else country
+                        j = job(t.group(1), c.group(1) if c else "", loc, u.group(1), "", "LinkedIn",
+                                guess_country(clean(loc)) or country, d.group(1)[:10] if d else "")
+                        k = util.dedupe_key(j)
+                        if k in seen:
+                            continue
+                        seen.add(k)
+                        new += 1
+                        out.append(j)
+                        country_hits += 1
+                    except Exception:
                         continue
-                    loc = l.group(1) if l else country
-                    j = job(t.group(1), c.group(1) if c else "", loc, u.group(1), "", "LinkedIn",
-                            guess_country(clean(loc)) or country, d.group(1)[:10] if d else "")
-                    k = dedupe_key(j)
-                    if k in seen:
-                        continue
-                    seen.add(k)
-                    new += 1
-                    unknown += not util.is_known(j)
-                    out.append(j)
-                    country_hits += 1
-                time.sleep(1.0)
+                time.sleep(random.uniform(1.0, 2.0))
                 if not cards or not new:
                     break                                   # the results started repeating
-                stale = stale + 1 if not unknown else 0
-                if stale >= 2:
-                    break                                   # two pages of jobs you already have: the rest is older news
                 start += len(cards)
-            if challenged >= 3:
+            if challenged >= 3 or requests >= budget:
                 break
         log(f"LinkedIn {country}: {country_hits} jobs" + (" (stopped: LinkedIn is limiting requests)" if challenged >= 3 else ""))
+        if requests >= budget:
+            log(f"LinkedIn: reached this search's limit of {budget} requests - the rest waits for the next search")
+            break
         blocked_countries = blocked_countries + 1 if challenged >= 3 else 0
         if blocked_countries >= 2:
             log("LinkedIn: limited in two countries in a row - trying again next run")
@@ -215,7 +248,7 @@ def fetch_linkedin(cfg: dict, profile: dict) -> list[dict]:
 
 
 def enrich_linkedin(j: dict) -> None:
-    m = re.search(r"-(\d{6,})/?$", j["url"].split("?")[0])
+    m = re.search(r"-(\d{6,})/?$", j["url"].split("?")[0]) or re.search(r"/jobs/view/(\d{6,})", j["url"])
     if not m:
         return
     status, body = http(f"https://www.linkedin.com/jobs/view/{m.group(1)}")
@@ -223,15 +256,14 @@ def enrich_linkedin(j: dict) -> None:
         return
     d = re.search(r'show-more-less-html__markup[^>]*>([\s\S]*?)</div>', body)
     if d:
-        j["description"] = clean(d.group(1))[:6000]
+        j["description"] = clean(d.group(1), keep_lines=True)[:6000]
     for label, val in re.findall(r'description__job-criteria-subheader">\s*([^<]+)</h3>\s*<span[^>]*>\s*([^<]+)', body):
         if "Seniority" in label:
-            j["description"] = f"Seniority level: {clean(val)}. " + j["description"]
+            j["description"] = f"Seniority level: {clean(val)}.\n" + j["description"]
     if j["company"] == "Unknown":
         t = re.search(r"<title>([^|<]+?)\s+hiring\s", body)
         if t:
             j["company"] = clean(t.group(1))
-    time.sleep(0.8)
 
 
 # ---------------------------------------------------------------- SEEK (Australia, public API)
@@ -239,26 +271,35 @@ def fetch_seek(cfg: dict, profile: dict) -> list[dict]:
     if not cfg.get("enabled") or "Australia" not in countries(profile):
         return []
     out, seen = [], set()
+    days = window(31, "seek")
     for q in cfg.get("queries", ["civil engineer"]) + profile["search"].get("queries_other", []) + profile["search"].get("queries_oilgas", []):
         for page in range(1, int(cfg.get("pages", 2)) + 1):
             url = ("https://www.seek.com.au/api/jobsearch/v5/search?siteKey=AU-Main&sourcesystem=houston"
-                   f"&keywords={quote_plus(q)}&page={page}&pageSize=50&locale=en-AU&sortmode=ListedDate&daterange={window(31)}")
+                   f"&keywords={quote_plus(q)}&page={page}&pageSize=50&locale=en-AU&sortmode=ListedDate&daterange={days}")
             status, data = http_json(url)
             if status != 200 or not data:
                 log(f"SEEK: HTTP {status} on '{q}' p{page}")
+                if status == 429:
+                    return out
                 break
-            rows = data.get("data", [])
+            rows = data.get("data") or []
+            unknown = 0
             for r in rows:
-                jid = str(r.get("id"))
-                if jid in seen:
+                try:
+                    jid = str(r.get("id"))
+                    if jid in seen:
+                        continue
+                    seen.add(jid)
+                    loc = ", ".join((x.get("label") or "") for x in (r.get("locations") or []) if isinstance(x, dict)) or "Australia"
+                    desc = "\n".join([r.get("teaser") or ""] + [str(b) for b in (r.get("bulletPoints") or [])] + [r.get("salaryLabel") or ""])
+                    j = job(r.get("title"), (r.get("advertiser") or {}).get("description") or r.get("companyName"),
+                            loc, f"https://www.seek.com.au/job/{jid}", desc, "SEEK", "Australia", (r.get("listingDate") or "")[:10])
+                    unknown += not util.is_known(j)
+                    out.append(j)
+                except Exception:
                     continue
-                seen.add(jid)
-                loc = ", ".join(x.get("label", "") for x in (r.get("locations") or [])) or "Australia"
-                desc = " ".join([r.get("teaser", "")] + (r.get("bulletPoints") or []) + [r.get("salaryLabel", "") or ""])
-                out.append(job(r.get("title"), (r.get("advertiser") or {}).get("description") or r.get("companyName"),
-                               loc, f"https://www.seek.com.au/job/{jid}", desc, "SEEK", "Australia", (r.get("listingDate") or "")[:10]))
-            if len(rows) < 50:
-                break
+            if len(rows) < 50 or (_quick() and not unknown):
+                break                                       # newest first: a page of jobs you already have = the rest is older
             time.sleep(0.6)
     log(f"SEEK: {len(out)} rows")
     return out
@@ -267,9 +308,6 @@ def fetch_seek(cfg: dict, profile: dict) -> list[dict]:
 # ---------------------------------------------------------------- Workday (employer ATS, reliable)
 WD_CODES = {"AE": "United Arab Emirates", "SA": "Saudi Arabia", "KSA": "Saudi Arabia", "QA": "Qatar", "KW": "Kuwait", "OM": "Oman",
             "BH": "Bahrain", "CA": "Canada", "AU": "Australia"}
-WD_COUNTRY_IDS = {"Saudi Arabia": "50423b5190ad49bb89e94cd58dfaad69", "United Arab Emirates": "7b4fa1f369bd4604ba3692682fcbe345",
-                  "Qatar": "f5ff182c7fab406bbb110cc1f7e99064", "Oman": "e8424552931249ba9c6c1d7706cdc01d",
-                  "Kuwait": "eb2e6ec0f73c4b0e94c68396631332d6", "Canada": "a30a87ed25634629aa6c3958aa2b91ea"}
 WD_QUERIES = ["civil", "site engineer", "project engineer", "QA/QC", "planning engineer", "quantity surveyor", "HSE",
               "document controller", "field engineer", "construction"]
 
@@ -304,29 +342,54 @@ def _wd_posted(text: str) -> str:
     return (date.today() - timedelta(days=d)).isoformat()
 
 
-def fetch_workday(cfg: dict, profile: dict) -> list[dict]:
-    out = []
-    targets = set(profile["target_titles"])
-    for c in profile.get("categories", {}).values():
-        if isinstance(c, dict):
-            targets |= set(c.get("target_titles", []))
+def _wd_facet(api: str, profile: dict):
+    """The employer's own country filter, found from its search page: (parameter, [ids]) for your countries, or None.
+    Picks the facet that covers the most of your countries (not the city-level 'locations' list)."""
+    status, d = http_json(api, {"appliedFacets": {}, "limit": 1, "offset": 0, "searchText": ""})
+    if status != 200 or not d:
+        return None, status
+    want = {c.lower() for c in countries(profile)}
+    best = None
+
+    def walk(facets):
+        nonlocal best
+        for f in facets or []:
+            if not isinstance(f, dict):
+                continue
+            param = f.get("facetParameter") or ""
+            vals = [v for v in f.get("values") or [] if isinstance(v, dict)]
+            ids = [v["id"] for v in vals if (v.get("descriptor") or "").strip().lower() in want and v.get("id")]
+            if ids and param != "locations" and (best is None or len(ids) > len(best[1])):
+                best = (param, ids)
+            walk([v for v in vals if v.get("facetParameter") or v.get("values")])
+    walk(d.get("facets"))
+    return best, status
+
+
+def _wd_board(b: dict, cfg: dict, profile: dict, targets: set) -> list[dict]:
+    base = f"https://{b['tenant']}.{b['host']}.myworkdayjobs.com"
+    api = f"{base}/wday/cxs/{b['tenant']}/{b['site']}/jobs"
+    facet, status = _wd_facet(api, profile)
+    if status != 200:
+        log(f"Workday {b['company']}: HTTP {status}")
+        return []
+    applied = {facet[0]: facet[1]} if facet else {}
     pages = int(cfg.get("pages", 5))
-    for b in cfg.get("boards", []):
-        base = f"https://{b['tenant']}.{b['host']}.myworkdayjobs.com"
-        api = f"{base}/wday/cxs/{b['tenant']}/{b['site']}/jobs"
-        seen, mine, failed = set(), [], False
-        for q in cfg.get("queries") or WD_QUERIES:
-            for page in range(pages):
-                facets = {b["country_param"]: [WD_COUNTRY_IDS[c] for c in countries(profile) if c in WD_COUNTRY_IDS]} if b.get("country_param") else {}
-                status, data = http_json(api, {"appliedFacets": facets, "limit": 20, "offset": page * 20, "searchText": q})
-                if status != 200 or not data:
-                    if status:
-                        log(f"Workday {b['company']}: HTTP {status}")
-                    failed = status in (401, 403, 404)
-                    break
-                rows = data.get("jobPostings", [])
-                for p in rows:
-                    path = p.get("externalPath", "")
+    seen, mine = set(), []
+    for q in cfg.get("queries") or WD_QUERIES:
+        total = None
+        for page in range(pages):
+            status, data = http_json(api, {"appliedFacets": applied, "limit": 20, "offset": page * 20, "searchText": q})
+            if status != 200 or not data:
+                if status:
+                    log(f"Workday {b['company']}: HTTP {status}")
+                break
+            if total is None:
+                total = int(data.get("total") or 0)          # later pages report 0 - the first page's total counts
+            rows = data.get("jobPostings") or []
+            for p in rows:
+                try:
+                    path = p.get("externalPath") or ""
                     if not path or path in seen:
                         continue
                     seen.add(path)
@@ -334,26 +397,37 @@ def fetch_workday(cfg: dict, profile: dict) -> list[dict]:
                     country = _wd_country(path, loc)
                     if country and country not in countries(profile):
                         continue
-                    mine.append(job(p.get("title"), b["company"], loc or country, f"{base}/{b['site']}{path}", "",
-                                    "Career site", country, _wd_posted(p.get("postedOn", ""))))
-                time.sleep(0.4)
-                if len(rows) < 20 or (page + 1) * 20 >= int(data.get("total") or 0):
-                    break
-            if failed:
+                    j = job(p.get("title"), b["company"], loc or country, f"{base}/{b['site']}{path}", "",
+                            "Career site", country, _wd_posted(p.get("postedOn") or ""))
+                    if facet and not country:
+                        j["target_area"] = True          # the employer's filter already limited it to your countries
+                    mine.append(j)
+                except Exception:
+                    continue
+            time.sleep(0.4)
+            if len(rows) < 20 or (page + 1) * 20 >= total:
                 break
-        # still unknown after the URL check: ask the detail endpoint, for titles worth it
-        resolved = 0
-        for j in mine:
-            if j["country"] or resolved >= 40:
-                continue
-            t = j["title"].lower()
-            if any(w in t for w in targets) and not re.search(r"\b(senior|principal|lead|manager|director|national)\b", t):
-                enrich_workday(j)
-                resolved += 1
-                time.sleep(0.3)
-        out += [j for j in mine if not (j["country"] and j["country"] not in countries(profile))]
-        log(f"Workday {b['company']}: {len(seen)} listings, {len(mine)} in target countries or unknown, {resolved} detail lookups")
-    return out
+    # still unknown after the URL check: ask the detail endpoint, for titles worth it
+    resolved = 0
+    for j in mine:
+        if j["country"] or resolved >= 40:
+            continue
+        t = j["title"].lower()
+        if any(w in t for w in targets) and not re.search(r"\b(senior|principal|lead|manager|director|national)\b", t):
+            enrich_workday(j)
+            resolved += 1
+            time.sleep(0.3)
+    log(f"Workday {b['company']}: {len(seen)} listings" + (f" (filtered to your countries by '{facet[0]}')" if facet else " (no country filter)")
+        + (f", {resolved} detail lookups" if resolved else ""))
+    return [j for j in mine if not (j["country"] and j["country"] not in countries(profile))]
+
+
+def fetch_workday(cfg: dict, profile: dict) -> list[dict]:
+    targets = set(profile["target_titles"])
+    for c in profile.get("categories", {}).values():
+        if isinstance(c, dict):
+            targets |= set(c.get("target_titles", []))
+    return _per_board(cfg.get("boards", []), lambda b: _wd_board(b, cfg, profile, targets), workers=4)
 
 
 def enrich_workday(j: dict) -> None:
@@ -373,22 +447,24 @@ def enrich_workday(j: dict) -> None:
 
 
 # ---------------------------------------------------------------- SuccessFactors (employer ATS)
-def fetch_successfactors(cfg: dict, profile: dict) -> list[dict]:
-    out = []
-    for b in cfg.get("boards", []):
-        seen, more = set(), {}
-        for q, startrow in [(q, r) for q in ["civil", "site engineer", "project engineer", "QA/QC", "infrastructure", "HSE",
-                                                  "quantity surveyor", "planning", "storekeeper"] for r in (0, 25)]:
-            root = f"{b['base']}/{b['slug']}" if b.get("slug") else b["base"]
-            url = f"{root}/search/?q={quote_plus(q)}&locationsearch=&startrow={startrow}"
-            if startrow and not more.get(q):
-                continue
-            status, body = http(url)
-            if status != 200:
-                log(f"SuccessFactors {b['company']}: HTTP {status}")
+def _sf_board(b: dict, profile: dict) -> list[dict]:
+    out, seen, more, fails = [], set(), {}, 0
+    for q, startrow in [(q, r) for q in ["civil", "site engineer", "project engineer", "QA/QC", "infrastructure", "HSE",
+                                         "quantity surveyor", "planning", "storekeeper"] for r in (0, 25)]:
+        root = f"{b['base']}/{b['slug']}" if b.get("slug") else b["base"]
+        url = f"{root}/search/?q={quote_plus(q)}&locationsearch=&startrow={startrow}"
+        if startrow and not more.get(q):
+            continue
+        status, body = http(url)
+        if status != 200:
+            fails += 1
+            if fails >= 3 or status in (401, 403, 404, 429):
+                log(f"SuccessFactors {b['company']}: HTTP {status} - stopped")
                 break
-            more[q] = f"startrow={startrow + 25}" in body or bool(re.search(r'title="Page 2"|class="paginationItemLast"', body))
-            for m in re.finditer(r'<tr class="data-row">([\s\S]*?)</tr>', body):
+            continue
+        more[q] = f"startrow={startrow + 25}" in body or bool(re.search(r'title="Page 2"|class="paginationItemLast"', body))
+        for m in re.finditer(r'<tr class="data-row">([\s\S]*?)</tr>', body):
+            try:
                 row = m.group(1)
                 a = re.search(r'href="([^"]+)"[^>]*class="jobTitle-link"[^>]*>([^<]+)</a>', row) or \
                     re.search(r'class="jobTitle-link"[^>]*href="([^"]+)"[^>]*>([^<]+)</a>', row)
@@ -404,18 +480,27 @@ def fetch_successfactors(cfg: dict, profile: dict) -> list[dict]:
                 if country and country not in countries(profile):
                     continue
                 out.append(job(title, b["company"], loc, urljoin(b["base"], href), "", "Career site", country))
-            time.sleep(0.5)
-        log(f"SuccessFactors {b['company']}: {len(seen)} rows")
+            except Exception:
+                continue
+        time.sleep(0.5)
+    log(f"SuccessFactors {b['company']}: {len(seen)} rows")
     return out
+
+
+def fetch_successfactors(cfg: dict, profile: dict) -> list[dict]:
+    return _per_board(cfg.get("boards", []), lambda b: _sf_board(b, profile), workers=6)
 
 
 def enrich_successfactors(j: dict) -> None:
     status, body = http(j["url"])
     if status == 200:
         m = re.search(r'<span class="jobdescription">([\s\S]*?)</span>\s*</div>', body) or \
+            re.search(r'itemprop="description"[^>]*>([\s\S]{200,40000}?)</(?:span|div)>\s*(?:</div>|<div)', body) or \
             re.search(r'class="jobDisplay[\s\S]*?<div[^>]*>([\s\S]{200,20000}?)</div>\s*</div>', body)
         if m:
-            j["description"] = clean(m.group(1))[:6000]
+            text = clean(m.group(1), keep_lines=True)
+            if len(text) > 150:
+                j["description"] = text[:6000]
 
 
 # ---------------------------------------------------------------- Workable
@@ -430,25 +515,31 @@ def fetch_workable(cfg: dict, profile: dict) -> list[dict]:
             status, data = http_json(f"https://apply.workable.com/api/v3/accounts/{a['account']}/jobs", body)
             if status != 200 or not data:
                 break
-            results += data.get("results", [])
+            results += data.get("results") or []
             token = data.get("nextPage")
             if not token:
                 break
             time.sleep(2)
+        if status == 429:
+            log("Workable asked to slow down - skipped until it allows requests again")
+            break                                           # every account is on the same site
         if not results:
             log(f"Workable {a['company']}: HTTP {status}")
             time.sleep(2)
             continue
         n = 0
         for r in results:
-            loc = r.get("location") or {}
-            loc_txt = ", ".join(x for x in [loc.get("city"), loc.get("country")] if x)
-            country = guess_country(loc_txt)
-            if country and country not in countries(profile):
+            try:
+                loc = r.get("location") or {}
+                loc_txt = ", ".join(x for x in [loc.get("city"), loc.get("country")] if x)
+                country = guess_country(loc_txt)
+                if country and country not in countries(profile):
+                    continue
+                url = f"https://apply.workable.com/{a['account']}/j/{r.get('shortcode')}/"
+                out.append(job(r.get("title"), a["company"], loc_txt, url, "", "Career site", country, (r.get("published") or "")[:10]))
+                n += 1
+            except Exception:
                 continue
-            url = f"https://apply.workable.com/{a['account']}/j/{r.get('shortcode')}/"
-            out.append(job(r.get("title"), a["company"], loc_txt, url, "", "Career site", country, (r.get("published") or "")[:10]))
-            n += 1
         log(f"Workable {a['company']}: {n} rows")
         time.sleep(2)
     return out
@@ -512,17 +603,23 @@ def fetch_smartrecruiters(cfg: dict, profile: dict) -> list[dict]:
             q = f"&q={quote_plus(cfg['queries'][0])}" if cfg.get("queries") else ""      # (tests)
             for offset in range(0, int(cfg.get("max_per_country", 400)), 100):
                 status, data = http_json(f"https://api.smartrecruiters.com/v1/companies/{quote(cid)}/postings?limit=100&offset={offset}&country={cc}{q}")
+                if status == 429:
+                    log("SmartRecruiters asked to slow down - stopped for this search")
+                    return out
                 if status != 200 or not data:
                     break
-                rows = data.get("content", [])
+                rows = data.get("content") or []
                 for it in rows:
-                    if it.get("id") in seen:
+                    try:
+                        if it.get("id") in seen:
+                            continue
+                        seen.add(it.get("id"))
+                        loc = it.get("location") or {}
+                        loc_txt = ", ".join(x for x in [loc.get("city"), country] if x)
+                        out.append(job(it.get("name"), name, loc_txt, f"https://jobs.smartrecruiters.com/{cid}/{it.get('id')}", "",
+                                       "Career site", country, (it.get("releasedDate") or "")[:10]))
+                    except Exception:
                         continue
-                    seen.add(it.get("id"))
-                    loc = it.get("location") or {}
-                    loc_txt = ", ".join(x for x in [loc.get("city"), country] if x)
-                    out.append(job(it.get("name"), name, loc_txt, f"https://jobs.smartrecruiters.com/{cid}/{it.get('id')}", "",
-                                   "Career site", country, (it.get("releasedDate") or "")[:10]))
                 if len(rows) < 100 or offset + 100 >= int(data.get("totalFound") or 0):
                     break
                 time.sleep(0.3)
@@ -534,68 +631,77 @@ def _search_countries(profile: dict) -> list[str]:
     return [c for c in countries(profile) if c != "Bahrain"]
 
 
-def fetch_phenom(cfg: dict, profile: dict) -> list[dict]:
-    """Phenom career sites (ADNOC, Bechtel, Mace, Ma'aden): the JSON the site's own search page uses."""
-    out = []
-    for b in cfg.get("boards", []):
-        base = b["base"].rstrip("/")                       # e.g. https://jobs.adnoc.ae/us/en
-        m = re.match(r"(https://[^/]+)/([a-z]{2})/([a-z]{2})", base)
-        if not m:
-            continue
-        host, cc, lang = m.groups()
-        seen = set()
-        for q in cfg.get("queries") or EMPLOYER_QUERIES:
-            for page in range(int(cfg.get("pages", 2))):
-                body = {"lang": f"{lang}_{cc}", "deviceType": "desktop", "country": cc, "pageName": "search-results", "ddoKey": "refineSearch",
-                        "sortBy": "Most recent", "subsearch": "", "from": page * 50, "jobs": True, "counts": True, "all_fields": ["country", "city"],
-                        "size": 50, "clearAll": False, "jdsource": "facets", "isSliderEnable": False, "pageId": "page20", "siteType": "external",
-                        "keywords": q, "global": True, "selected_fields": {}, "locationData": {}}
-                status, data = http_json(f"{host}/widgets", body)
-                rs = (data or {}).get("refineSearch") or {}
-                jobs_ = (rs.get("data") or {}).get("jobs") or []
-                if status != 200 or not jobs_:
-                    break
-                for r in jobs_:
+def _phenom_board(b: dict, cfg: dict, profile: dict) -> list[dict]:
+    base = b["base"].rstrip("/")                           # e.g. https://jobs.adnoc.ae/us/en
+    m = re.match(r"(https://[^/]+)/([a-z]{2})/([a-z]{2})", base)
+    if not m:
+        return []
+    host, cc, lang = m.groups()
+    out, seen = [], set()
+    names = [c for c in countries(profile)]
+    for q in cfg.get("queries") or EMPLOYER_QUERIES:
+        for page in range(int(cfg.get("pages", 2))):
+            body = {"lang": f"{lang}_{cc}", "deviceType": "desktop", "country": cc, "pageName": "search-results", "ddoKey": "refineSearch",
+                    "sortBy": "Most recent", "subsearch": "", "from": page * 50, "jobs": True, "counts": True, "all_fields": ["country", "city"],
+                    "size": 50, "clearAll": False, "jdsource": "facets", "isSliderEnable": False, "pageId": "page20", "siteType": "external",
+                    "keywords": q, "global": True, "selected_fields": {"country": names}, "locationData": {}}
+            status, data = http_json(f"{host}/widgets", body)
+            rs = (data or {}).get("refineSearch") or {}
+            jobs_ = (rs.get("data") or {}).get("jobs") or []
+            if status != 200 or not jobs_:
+                break
+            unknown = 0
+            for r in jobs_:
+                try:
                     jid = str(r.get("jobId") or r.get("reqId") or "")
                     if not jid or jid in seen:
                         continue
                     seen.add(jid)
                     loc = r.get("location") or ", ".join(x for x in [r.get("city"), r.get("country")] if x)
-                    country = guess_country(loc)
+                    country = guess_country(loc) or guess_country(r.get("country") or "")
                     if country and country not in countries(profile):
                         continue
                     slug = re.sub(r"[^a-z0-9]+", "-", (r.get("title") or "").lower()).strip("-")
-                    out.append(job(r.get("title"), b["company"], loc, f"{base}/job/{jid}/{slug}", r.get("descriptionTeaser") or "",
-                                   "Career site", country, (r.get("postedDate") or "")[:10]))
-                if (page + 1) * 50 >= int(rs.get("totalHits") or 0):
-                    break
-                time.sleep(0.6)
-        log(f"Phenom {b['company']}: {len(seen)} listings")
+                    j = job(r.get("title"), b["company"], loc, f"{base}/job/{jid}/{slug}", r.get("descriptionTeaser") or "",
+                            "Career site", country, (r.get("postedDate") or "")[:10])
+                    j["target_area"] = True
+                    unknown += not util.is_known(j)
+                    out.append(j)
+                except Exception:
+                    continue
+            if (page + 1) * 50 >= int(rs.get("totalHits") or 0) or (_quick() and not unknown):
+                break
+            time.sleep(0.6)
+    log(f"Phenom {b['company']}: {len(seen)} listings")
     return out
 
 
-def fetch_eightfold(cfg: dict, profile: dict) -> list[dict]:
-    """Eightfold career sites (NEOM, Worley, Fluor). api 'v2' = /api/apply/v2/jobs, 'pcsx' = /api/pcsx/search."""
+def fetch_phenom(cfg: dict, profile: dict) -> list[dict]:
+    """Phenom career sites (ADNOC, Bechtel, Mace, Ma'aden): the JSON the site's own search page uses, filtered to your
+    countries on the site itself."""
+    return _per_board(cfg.get("boards", []), lambda b: _phenom_board(b, cfg, profile), workers=4)
+
+
+def _ef_board(b: dict, cfg: dict, profile: dict) -> list[dict]:
     from datetime import datetime, timezone
-    out = []
-    for b in cfg.get("boards", []):
-        host, domain, api = b["host"], b["domain"], b.get("api", "v2")
-        seen = set()
-        for country in _search_countries(profile):
-            for q in cfg.get("queries") or EMPLOYER_QUERIES[:6]:
-                for page in range(int(cfg.get("pages", 2))):
-                    if api == "pcsx":
-                        url = (f"https://{host}/api/pcsx/search?domain={quote(domain)}&query={quote_plus(q)}&location={quote_plus(country)}"
-                               f"&start={page * 10}&sort_by=timestamp")
-                    else:
-                        url = (f"https://{host}/api/apply/v2/jobs?domain={quote(domain)}&start={page * 10}&num=10&query={quote_plus(q)}"
-                               f"&location={quote_plus(country)}&sort_by=relevance")
-                    status, data = http_json(url)
-                    if status != 200 or not data:
-                        break
-                    d = data.get("data", data)
-                    rows = d.get("positions") or []
-                    for r in rows:
+    host, domain, api = b["host"], b["domain"], b.get("api", "v2")
+    out, seen = [], set()
+    for country in [c for c in _search_countries(profile) if not b.get("countries") or c in b["countries"]]:
+        for q in cfg.get("queries") or EMPLOYER_QUERIES[:6]:
+            for page in range(int(cfg.get("pages", 2))):
+                if api == "pcsx":
+                    url = (f"https://{host}/api/pcsx/search?domain={quote(domain)}&query={quote_plus(q)}&location={quote_plus(country)}"
+                           f"&start={page * 10}&sort_by=timestamp")
+                else:
+                    url = (f"https://{host}/api/apply/v2/jobs?domain={quote(domain)}&start={page * 10}&num=10&query={quote_plus(q)}"
+                           f"&location={quote_plus(country)}&sort_by=relevance")
+                status, data = http_json(url)
+                if status != 200 or not data:
+                    break
+                d = data.get("data", data)
+                rows = d.get("positions") or []
+                for r in rows:
+                    try:
                         pid = str(r.get("id") or r.get("atsJobId") or r.get("ats_job_id") or "")
                         if not pid or pid in seen:
                             continue
@@ -608,14 +714,22 @@ def fetch_eightfold(cfg: dict, profile: dict) -> list[dict]:
                         link = r.get("canonicalPositionUrl") or r.get("positionUrl") or ""
                         if link.startswith("/"):
                             link = f"https://{host}{link}"
-                        ts = r.get("postedTs") or r.get("t_create")
+                        ts = r.get("postedTs") or r.get("t_update")            # t_create is when the req was opened, not posted
                         posted = datetime.fromtimestamp(int(ts), timezone.utc).date().isoformat() if ts else ""
-                        out.append(job(r.get("name"), b["company"], loc, link, r.get("job_description") or "", "Career site", c, posted))
-                    if len(rows) < 10:
-                        break
-                    time.sleep(0.5)
-        log(f"Eightfold {b['company']}: {len(seen)} listings")
+                        j = job(r.get("name"), b["company"], loc, link, r.get("job_description") or "", "Career site", c or country, posted)
+                        out.append(j)
+                    except Exception:
+                        continue
+                if len(rows) < 10:
+                    break
+                time.sleep(0.5)
+    log(f"Eightfold {b['company']}: {len(seen)} listings")
     return out
+
+
+def fetch_eightfold(cfg: dict, profile: dict) -> list[dict]:
+    """Eightfold career sites (NEOM, Worley, Fluor). api 'v2' = /api/apply/v2/jobs, 'pcsx' = /api/pcsx/search."""
+    return _per_board(cfg.get("boards", []), lambda b: _ef_board(b, cfg, profile), workers=3)
 
 
 def fetch_jobsyn(cfg: dict, profile: dict) -> list[dict]:
@@ -644,8 +758,10 @@ def fetch_jobsyn(cfg: dict, profile: dict) -> list[dict]:
                         city = re.sub(r"[^a-z0-9]+", "-", (r.get("city_exact") or "").lower()).strip("-") or "job"
                         iso3 = (loc.split(",")[-1].strip().lower() or "x")
                         slug = re.sub(r"[^a-z0-9]+", "-", (r.get("title_exact") or "").lower()).strip("-")
-                        out.append(job(r.get("title_exact"), b["company"], loc, f"https://{b['origin']}/{city}-{iso3}/{slug}/{gid}/job/",
-                                       r.get("description") or "", "Career site", c, (r.get("date_new") or "")[:10]))
+                        j = job(r.get("title_exact"), b["company"], loc, f"https://{b['origin']}/{city}-{iso3}/{slug}/{gid}/job/",
+                                r.get("description") or "", "Career site", c, (r.get("date_new") or "")[:10])
+                        j["target_area"] = True                 # asked for this country
+                        out.append(j)
                     if not (data.get("pagination") or {}).get("has_more_pages"):
                         break
                     time.sleep(0.5)
@@ -685,23 +801,26 @@ def fetch_rigzone(cfg: dict, profile: dict) -> list[dict]:
                 rows = data.get("SolrJobs") or []
                 total = int(data.get("NumFound") or 0)
                 for r in rows:
-                    pid = r.get("PostingID")
-                    if not pid or pid in seen:
-                        continue
-                    seen.add(pid)
-                    loc = clean(r.get("JobLocation", "")).replace(" ", " ")
-                    exp = r.get("IndustryExp") or 0
-                    desc = clean(r.get("JobDescription", ""))
-                    if exp:
-                        desc += f" Experience asked: {exp}+ years."
-                    posted = ""
                     try:
-                        from datetime import datetime
-                        posted = datetime.strptime(r.get("PostedDate", ""), "%B %d, %Y").date().isoformat()
+                        pid = r.get("PostingID")
+                        if not pid or pid in seen or not r.get("PostingUrl"):
+                            continue
+                        seen.add(pid)
+                        loc = clean(r.get("JobLocation") or "").replace("\u00a0", " ")
+                        exp = r.get("IndustryExp") or 0
+                        desc = clean(r.get("JobDescription") or "", keep_lines=True)
+                        if exp:
+                            desc += f"\nExperience asked: {exp}+ years."
+                        posted = ""
+                        try:
+                            from datetime import datetime
+                            posted = datetime.strptime(r.get("PostedDate") or "", "%B %d, %Y").date().isoformat()
+                        except Exception:
+                            pass
+                        out.append(job(r.get("JobTitle"), r.get("CompanyName"), loc, "https://www.rigzone.com" + r["PostingUrl"],
+                                       desc, "Rigzone", guess_country(loc) or country, posted))
                     except Exception:
-                        pass
-                    out.append(job(r.get("JobTitle"), r.get("CompanyName"), loc, "https://www.rigzone.com" + r.get("PostingUrl", ""),
-                                   desc, "Rigzone", guess_country(loc) or country, posted))
+                        continue
                 got += len(rows)
                 if not rows or got >= total:
                     break
@@ -735,8 +854,10 @@ def fetch_wordpress(cfg: dict, profile: dict) -> list[dict]:
                    "&orderby=date&_fields=id,date,link,title,excerpt,content")
             status, data = http_json(url)
             if status != 200 or not isinstance(data, list):
-                log(f"{site['name']}: HTTP {status}")
-                break
+                log(f"{site['name']}: HTTP {status} on '{q}'")
+                if status in (0, 403, 429) or status >= 500:
+                    break
+                continue
             for p in data:
                 d = (p.get("date") or "")[:10]
                 if d < cutoff:
@@ -761,26 +882,25 @@ def fetch_wordpress(cfg: dict, profile: dict) -> list[dict]:
 ORC_QUERIES = ["civil", "site engineer", "QA/QC", "planning", "quantity surveyor", "HSE", "storekeeper", "graduate"]
 
 
-def fetch_oracle(cfg: dict, profile: dict) -> list[dict]:
-    """Public JSON behind Oracle's candidate-experience career sites: <base>/hcmUI/CandidateExperience/en/sites/<site>."""
-    out = []
-    for b in cfg.get("boards", []):
-        base, site = b["base"].rstrip("/"), b.get("site", "CX_1")
-        seen = set()
-        for q in b.get("queries") or ORC_QUERIES:
-            for page in range(int(cfg.get("pages", 2))):
-                finder = (f'findReqs;siteNumber={site},facetsList=LOCATIONS,limit=25,offset={page * 25},'
-                          f'keyword="{q}",sortBy=POSTING_DATES_DESC')
-                url = (f"{base}/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true"
-                       f"&expand=requisitionList.secondaryLocations&finder={quote(finder, safe='=;,')}")
-                status, data = http_json(url)
-                if status != 200 or not data or not data.get("items"):
-                    if status not in (200, 0):
-                        log(f"Oracle {b['company']}: HTTP {status}")
-                    break
-                item = data["items"][0]
-                reqs = item.get("requisitionList") or []
-                for r in reqs:
+def _oracle_board(b: dict, cfg: dict, profile: dict) -> list[dict]:
+    base, site = b["base"].rstrip("/"), b.get("site", "CX_1")
+    out, seen = [], set()
+    for q in b.get("queries") or ORC_QUERIES:
+        for page in range(int(cfg.get("pages", 2))):
+            finder = (f'findReqs;siteNumber={site},facetsList=LOCATIONS,limit=25,offset={page * 25},'
+                      f'keyword="{q}",sortBy=POSTING_DATES_DESC')
+            url = (f"{base}/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true"
+                   f"&expand=requisitionList.secondaryLocations&finder={quote(finder, safe='=;,')}")
+            status, data = http_json(url)
+            if status != 200 or not data or not data.get("items"):
+                if status not in (200, 0):
+                    log(f"Oracle {b['company']}: HTTP {status}")
+                break
+            item = data["items"][0]
+            reqs = item.get("requisitionList") or []
+            unknown = 0
+            for r in reqs:
+                try:
                     rid = str(r.get("Id") or "")
                     if not rid or rid in seen:
                         continue
@@ -789,13 +909,22 @@ def fetch_oracle(cfg: dict, profile: dict) -> list[dict]:
                     country = guess_country(f"{loc}, {r.get('PrimaryLocationCountry') or ''}")
                     if country and country not in countries(profile):
                         continue
-                    out.append(job(r.get("Title"), b["company"], loc, f"{base}/hcmUI/CandidateExperience/en/sites/{site}/job/{rid}",
-                                   r.get("ShortDescriptionStr") or "", "Career site", country, (r.get("PostedDate") or "")[:10]))
-                if len(reqs) < 25 or (page + 1) * 25 >= int(item.get("TotalJobsCount") or 0):
-                    break
-                time.sleep(0.6)
-        log(f"Oracle {b['company']}: {len(seen)} listings")
+                    j = job(r.get("Title"), b["company"], loc, f"{base}/hcmUI/CandidateExperience/en/sites/{site}/job/{rid}",
+                            r.get("ShortDescriptionStr") or "", "Career site", country, (r.get("PostedDate") or "")[:10])
+                    unknown += not util.is_known(j)
+                    out.append(j)
+                except Exception:
+                    continue
+            if len(reqs) < 25 or (page + 1) * 25 >= int(item.get("TotalJobsCount") or 0) or (_quick() and not unknown):
+                break
+            time.sleep(0.6)
+    log(f"Oracle {b['company']}: {len(seen)} listings")
     return out
+
+
+def fetch_oracle(cfg: dict, profile: dict) -> list[dict]:
+    """Public JSON behind Oracle's candidate-experience career sites: <base>/hcmUI/CandidateExperience/en/sites/<site>."""
+    return _per_board(cfg.get("boards", []), lambda b: _oracle_board(b, cfg, profile), workers=6)
 
 
 def enrich_oracle(j: dict) -> None:
@@ -879,17 +1008,21 @@ def enrich(j: dict) -> None:
             log(f"  enrich failed {j['url'][:60]}: {e}")
 
 
+LAST_COUNTS: dict[str, int] = {}          # jobs each source returned in the last fetch_all (main records which worked)
+
+
 def fetch_all(sources: dict, profile: dict) -> list[dict]:
     """Each source is a different website, so they run side by side; inside a source requests stay one at a time
     with polite pauses."""
     from concurrent.futures import ThreadPoolExecutor
     fetchers = [
-        ("linkedin_guest", fetch_linkedin), ("browser_sites", sitebrowse.fetch), ("seek", fetch_seek), ("workday", fetch_workday), ("rigzone", fetch_rigzone),
-        ("newspapers", fetch_wordpress), ("successfactors", fetch_successfactors), ("workable", fetch_workable),
+        ("linkedin_guest", fetch_linkedin), ("browser_sites", sitebrowse.fetch), ("seek", fetch_seek), ("workday", fetch_workday),
+        ("rigzone", fetch_rigzone), ("newspapers", fetch_wordpress), ("successfactors", fetch_successfactors), ("workable", fetch_workable),
         ("jooble", fetch_jooble), ("gulftalent", fetch_gulftalent), ("google_alerts_rss", fetch_rss),
         ("greenhouse", fetch_greenhouse), ("lever", fetch_lever), ("smartrecruiters", fetch_smartrecruiters),
         ("oracle", fetch_oracle), ("phenom", fetch_phenom), ("eightfold", fetch_eightfold), ("jobsyn", fetch_jobsyn),
     ]
+    LAST_COUNTS.clear()
 
     def run(item):
         key, fn = item
@@ -899,32 +1032,48 @@ def fetch_all(sources: dict, profile: dict) -> list[dict]:
         except Exception as e:
             log(f"{key}: failed ({type(e).__name__}: {e})")
             got = []
+        LAST_COUNTS[key] = len(got)
         if time.time() - t0 > 5:
             log(f"  ({key}: {len(got)} jobs in {int(time.time() - t0)}s)")
         return got
     jobs = []
-    with ThreadPoolExecutor(max_workers=8) as ex:
+    with ThreadPoolExecutor(max_workers=len(fetchers)) as ex:
         for got in ex.map(run, fetchers):
             jobs.extend(got)
     return jobs
 
 
+# Full ads: one queue per website (all of LinkedIn's country sites are one website), a pause between requests, a cap per
+# search for the strictest site, and a stop for that site the moment it asks us to slow down.
+SITE_PAUSE = {"linkedin.com": (1.5, 3.0)}
+SITE_CAP = {"linkedin.com": 120}
+
+
 def enrich_many(jobs: list[dict], budget: int) -> int:
-    """Fetch full ads for up to `budget` jobs (best first). One worker per website, so each site still sees one
-    request at a time. Returns how many were fetched."""
+    """Fetch full ads for up to `budget` jobs (best first). Returns how many were fetched."""
     from concurrent.futures import ThreadPoolExecutor
     picked = [j for j in jobs if j.get("source") in ENRICHERS and (len(j.get("description", "")) < 300 or j.get("_snippet"))][:budget]
-    from urllib.parse import urlparse
     by_site: dict[str, list] = {}
-    for j in picked:                                   # group by website host (career sites are many different hosts)
-        by_site.setdefault(urlparse(j["url"]).netloc.lower(), []).append(j)
+    for j in picked:
+        by_site.setdefault(util.site_key(j["url"]) or "?", []).append(j)
 
-    def work(lst):
+    def work(item):
+        site, lst = item
+        lo, hi = SITE_PAUSE.get(site, (0.3, 0.9))
         n = 0
-        for j in lst:
+        for j in lst[:SITE_CAP.get(site, len(lst))]:
             before = len(j.get("description", ""))
+            j["_tried"] = True
+            util.reset_status()                     # a 429 from an earlier site on this thread doesn't count here
             enrich(j)
             n += len(j.get("description", "")) != before
+            if util.last_status() == 429:
+                j["_rate_limited"] = True
+                log(f"  {site} asked to slow down - its other full ads wait for the next search")
+                break
+            time.sleep(random.uniform(lo, hi))
         return n
+    if not by_site:
+        return 0
     with ThreadPoolExecutor(max_workers=max(1, min(10, len(by_site)))) as ex:
-        return sum(ex.map(work, by_site.values()))
+        return sum(ex.map(work, by_site.items()))

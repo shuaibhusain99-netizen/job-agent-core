@@ -6,19 +6,19 @@
 <title>Job Agent</title>
 <style>
 :root{
-  --paper:#EEF2F1; --sheet:#FFFFFF; --ink:#17262A; --ink-2:#4A5B5F; --ink-3:#7F8E91; --rule:#D3DBDA; --rule-2:#E5EBEA;
-  --teal:#0B6B66; --teal-ink:#FFFFFF; --teal-soft:#DDEEEC; --amber:#B47A06; --amber-soft:#FBF0D5;
-  --green:#2E7D4F; --green-soft:#DDF0E3; --red:#A9432F; --red-soft:#F6E1DC;
+  --paper:#EEF2F1; --sheet:#FFFFFF; --ink:#17262A; --ink-2:#4A5B5F; --ink-3:#5F6F72; --rule:#D3DBDA; --rule-2:#E5EBEA;
+  --teal:#0B6B66; --teal-ink:#FFFFFF; --teal-soft:#DDEEEC; --amber:#8A6000; --amber-soft:#FBF0D5;
+  --green:#276B43; --green-soft:#DDF0E3; --red:#A9432F; --red-soft:#F6E1DC;
   --display:Bahnschrift,"DIN Alternate","D-DIN","Barlow","Segoe UI",system-ui,sans-serif;
   --body:"Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,Roboto,sans-serif;
   --r:6px; --shadow:0 1px 2px rgba(23,38,42,.06),0 8px 24px rgba(23,38,42,.08);
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
-  --paper:#111A1C; --sheet:#172124; --ink:#E4ECEA; --ink-2:#A9B8B6; --ink-3:#73817F; --rule:#2A3739; --rule-2:#21302F;
+  --paper:#111A1C; --sheet:#172124; --ink:#E4ECEA; --ink-2:#A9B8B6; --ink-3:#8A9896; --rule:#2A3739; --rule-2:#21302F;
   --teal:#4FB3A9; --teal-ink:#06201E; --teal-soft:#16302E; --amber:#E9B44C; --amber-soft:#3A2E12;
   --green:#6BC48E; --green-soft:#15301F; --red:#E08A76; --red-soft:#3A1F19; --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.35); color-scheme:dark}}
 :root[data-theme="dark"]{
-  --paper:#111A1C; --sheet:#172124; --ink:#E4ECEA; --ink-2:#A9B8B6; --ink-3:#73817F; --rule:#2A3739; --rule-2:#21302F;
+  --paper:#111A1C; --sheet:#172124; --ink:#E4ECEA; --ink-2:#A9B8B6; --ink-3:#8A9896; --rule:#2A3739; --rule-2:#21302F;
   --teal:#4FB3A9; --teal-ink:#06201E; --teal-soft:#16302E; --amber:#E9B44C; --amber-soft:#3A2E12;
   --green:#6BC48E; --green-soft:#15301F; --red:#E08A76; --red-soft:#3A1F19; --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.35); color-scheme:dark}
 *{box-sizing:border-box}
@@ -32,8 +32,10 @@ button.primary{background:var(--teal);border-color:var(--teal);color:var(--teal-
 button.primary:hover{filter:brightness(1.08)}
 button.quiet{border-color:transparent;background:transparent;color:var(--ink-2);padding:4px 6px}
 button.quiet:hover{color:var(--ink);background:var(--rule-2)}
+button.danger{color:var(--red)}
 button:disabled{opacity:.55;cursor:default}
-input[type=text],input[type=password],input[type=number],input[type=email],select,textarea{background:var(--sheet);border:1px solid var(--rule);border-radius:var(--r);padding:6px 9px;min-width:0}
+input[type=text],input[type=password],input[type=number],input[type=email],input[type=tel],select,textarea{background:var(--sheet);border:1px solid var(--rule);border-radius:var(--r);padding:6px 9px;min-width:0}
+input:invalid{border-color:var(--red)}
 textarea{width:100%;resize:vertical}
 a{color:var(--teal)}
 .num{font-family:var(--display);font-variant-numeric:tabular-nums}
@@ -41,9 +43,9 @@ a{color:var(--teal)}
 .small{font-size:12.5px}
 
 /* frame */
-.app{display:grid;grid-template-rows:auto 1fr;height:100vh}
-header.top{display:flex;align-items:center;gap:14px;padding:10px 18px;border-bottom:1px solid var(--rule);background:var(--sheet)}
-.brand{font-family:var(--display);font-size:19px;font-weight:600;letter-spacing:.01em;display:flex;align-items:center;gap:10px}
+.app{display:grid;grid-template-rows:auto 1fr;grid-template-columns:minmax(0,1fr);height:100vh}
+header.top{display:flex;align-items:center;gap:14px;padding:10px 18px;border-bottom:1px solid var(--rule);background:var(--sheet);min-width:0}
+.brand{font-family:var(--display);font-size:19px;font-weight:600;letter-spacing:.01em;display:flex;align-items:center;gap:10px;white-space:nowrap}
 .brand svg{flex:none}
 .run{display:flex;align-items:center;gap:10px;margin-left:auto;min-width:0}
 .pill{display:flex;align-items:center;gap:8px;padding:5px 11px;border-radius:999px;background:var(--rule-2);color:var(--ink-2);font-size:12.5px;max-width:52vw;min-width:0}
@@ -52,13 +54,14 @@ header.top{display:flex;align-items:center;gap:14px;padding:10px 18px;border-bot
 .dot.ok{background:var(--green)} .dot.busy{background:var(--amber);animation:pulse 1.2s infinite} .dot.off{background:var(--red)}
 @keyframes pulse{50%{opacity:.35}}
 @media (prefers-reduced-motion:reduce){.dot.busy{animation:none}}
+#runNow{white-space:nowrap}
 .body{display:grid;grid-template-columns:212px minmax(380px,1fr) minmax(420px,1.15fr);min-height:0}
-.body.settings-on{grid-template-columns:212px 1fr}
+.body.settings-on{grid-template-columns:212px minmax(0,1fr)}
 
 /* rail */
 nav.rail{border-right:1px solid var(--rule);padding:14px 10px;overflow:auto;display:flex;flex-direction:column;gap:18px}
 .rail h3{margin:0 8px 6px;font:600 12px/1 var(--body);color:var(--ink-3)}
-.rail button{display:flex;justify-content:space-between;align-items:center;width:100%;border:0;background:none;padding:7px 9px;border-radius:var(--r);color:var(--ink-2);text-align:left}
+.rail button{display:flex;justify-content:space-between;align-items:center;gap:8px;width:100%;border:0;background:none;padding:7px 9px;border-radius:var(--r);color:var(--ink-2);text-align:left}
 .rail button:hover{background:var(--rule-2);color:var(--ink)}
 .rail button.on{background:var(--sheet);color:var(--ink);font-weight:600;box-shadow:inset 3px 0 0 var(--teal)}
 .rail .c{font-family:var(--display);font-size:12.5px;color:var(--ink-3)}
@@ -66,14 +69,16 @@ nav.rail{border-right:1px solid var(--rule);padding:14px 10px;overflow:auto;disp
 .rail .c.new{color:var(--amber);font-weight:600}
 
 /* list */
-section.list{display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--rule)}
+section.list{display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--rule);min-width:0}
 .filters{display:flex;flex-wrap:wrap;gap:6px;padding:12px 14px 8px;align-items:center}
 .filters input[type=text]{flex:1 1 180px}
+.filters.more{padding-top:0}
 .ms{position:relative}
 .ms>button{display:flex;gap:6px;align-items:center;max-width:190px}
 .ms>button span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ms>button.set{border-color:var(--teal);color:var(--teal)}
-.ms .menu{display:none;position:absolute;z-index:20;top:calc(100% + 4px);left:0;min-width:220px;max-height:300px;overflow:auto;background:var(--sheet);border:1px solid var(--rule);border-radius:var(--r);box-shadow:var(--shadow);padding:6px}
+.ms .menu{display:none;position:absolute;z-index:20;top:calc(100% + 4px);left:0;min-width:220px;max-width:calc(100vw - 24px);max-height:300px;overflow:auto;background:var(--sheet);border:1px solid var(--rule);border-radius:var(--r);box-shadow:var(--shadow);padding:6px}
+.ms.right .menu{left:auto;right:0}
 .ms.open .menu{display:block}
 .ms label{display:flex;gap:8px;align-items:center;padding:4px 6px;border-radius:4px;cursor:pointer}
 .ms label:hover{background:var(--rule-2)}
@@ -87,7 +92,7 @@ section.list{display:flex;flex-direction:column;min-height:0;border-right:1px so
 .levels button.on{background:var(--teal-soft);color:var(--teal);font-weight:600}
 .listbar{display:flex;justify-content:space-between;align-items:center;padding:4px 14px 8px;color:var(--ink-3);font-size:12.5px;gap:10px}
 .rows{overflow:auto;flex:1;padding:0 8px 16px}
-.row{display:grid;grid-template-columns:48px 1fr auto;gap:10px;align-items:start;padding:10px 8px;border-radius:var(--r);cursor:pointer;border:1px solid transparent}
+.row{display:grid;grid-template-columns:48px minmax(0,1fr) auto;gap:10px;align-items:start;padding:10px 8px;border-radius:var(--r);cursor:pointer;border:1px solid transparent;content-visibility:auto;contain-intrinsic-size:auto 88px}
 .row+.row{margin-top:2px}
 .row:hover{background:var(--rule-2)}
 .row.sel{background:var(--sheet);border-color:var(--rule);box-shadow:var(--shadow)}
@@ -96,12 +101,14 @@ section.list{display:flex;flex-direction:column;min-height:0;border-right:1px so
 .sc small{display:block;font:11px var(--body);color:var(--ink-3);margin-top:3px}
 .rt{font-weight:600;line-height:1.3}
 .rm{color:var(--ink-2);font-size:12.5px;display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:2px}
+.rn{color:var(--ink-2);font-size:12.5px;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tags{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
 .tag{font-size:11.5px;padding:1px 7px;border-radius:4px;background:var(--rule-2);color:var(--ink-2);white-space:nowrap}
 .tag.new{background:var(--amber-soft);color:var(--amber);font-weight:600}
 .tag.pay{background:var(--green-soft);color:var(--green)}
 .tag.mail{background:var(--teal-soft);color:var(--teal)}
 .tag.og{background:var(--amber-soft);color:var(--ink)}
+.tag.bad{background:var(--red-soft);color:var(--red);font-weight:600}
 .tag.lv-starter,.tag.lv-support{background:var(--teal-soft);color:var(--teal)}
 .tag.lv-senior{background:var(--red-soft);color:var(--red)}
 .tag.ai{background:transparent;border:1px solid var(--rule);color:var(--ink-2)}
@@ -116,23 +123,23 @@ section.list{display:flex;flex-direction:column;min-height:0;border-right:1px so
 kbd{font:11px var(--body);border:1px solid var(--rule);border-bottom-width:2px;border-radius:4px;padding:0 5px;background:var(--sheet);color:var(--ink-2)}
 
 /* detail sheet: laid out like a drawing title block */
-section.detail{overflow:auto;padding:18px 22px 40px;min-height:0}
+section.detail{overflow:auto;padding:18px 22px 40px;min-height:0;min-width:0}
 .sheet{background:var(--sheet);border:1.5px solid var(--ink);border-radius:2px}
-.tb-head{display:grid;grid-template-columns:1fr auto;border-bottom:1.5px solid var(--ink)}
-.tb-title{padding:14px 16px}
-.tb-title h1{font-family:var(--display);font-size:24px;line-height:1.15;margin:0 0 4px;font-weight:600;text-wrap:balance}
+.tb-head{display:grid;grid-template-columns:minmax(0,1fr) auto;border-bottom:1.5px solid var(--ink)}
+.tb-title{padding:14px 16px;min-width:0}
+.tb-title h1{font-family:var(--display);font-size:24px;line-height:1.15;margin:0 0 4px;font-weight:600;text-wrap:balance;overflow-wrap:anywhere}
 .tb-title .co{color:var(--ink-2)}
 .tb-score{border-left:1.5px solid var(--ink);padding:12px 16px;min-width:150px;display:flex;flex-direction:column;justify-content:center;align-items:flex-end}
 .tb-score .big{font-family:var(--display);font-size:46px;line-height:.9;font-weight:600}
 .tb-score .big.hi{color:var(--green)} .tb-score .big.mid{color:var(--teal)} .tb-score .big.lo{color:var(--ink-3)}
 .tb-score .how{font-size:12px;color:var(--ink-3);margin-top:6px;text-align:right}
-.tb-grid{display:grid;grid-template-columns:repeat(3,1fr)}
+.tb-actions{display:flex;flex-wrap:wrap;gap:8px;padding:10px 14px;align-items:center;border-bottom:1.5px solid var(--ink);background:var(--sheet);position:sticky;top:0;z-index:2}
+.tb-actions .stat{margin-left:auto;display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink-2)}
+.tb-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
 .tb-cell{padding:8px 12px;border-right:1px solid var(--rule);border-bottom:1px solid var(--rule);min-width:0}
 .tb-cell:nth-child(3n){border-right:0}
 .tb-cell .k{font-size:11.5px;color:var(--ink-3)}
 .tb-cell .v{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.tb-actions{display:flex;flex-wrap:wrap;gap:8px;padding:12px 14px;align-items:center;border-top:1.5px solid var(--ink)}
-.tb-actions select{margin-left:auto}
 .verdict{padding:14px 16px;border-bottom:1px solid var(--rule)}
 .verdict p{margin:0 0 8px;max-width:72ch}
 .verdict .cols{display:grid;grid-template-columns:1fr 1fr;gap:12px}
@@ -140,19 +147,22 @@ section.detail{overflow:auto;padding:18px 22px 40px;min-height:0}
 .verdict .bad{color:var(--red)}
 .verdict h4,.part h4{margin:0;font:600 13px var(--body);color:var(--ink-2)}
 .part{padding:14px 16px;border-bottom:1px solid var(--rule)}
+.part:last-child{border-bottom:0}
 .part .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;gap:8px}
 .ad{white-space:pre-wrap;max-width:76ch;color:var(--ink);max-height:420px;overflow:auto}
 pre.letter{white-space:pre-wrap;font:inherit;margin:0;max-width:72ch}
-.note-in{width:100%}
-.why{font-size:12.5px;color:var(--ink-3);max-width:76ch}
+.why ul{margin:4px 0 0;padding-left:18px;max-width:76ch;color:var(--ink-2);font-size:13px}
+.qa{margin:8px 0 0;max-width:72ch}
+.qa .q{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
 .detail .placeholder{height:100%;display:grid;place-items:center;color:var(--ink-3);text-align:center}
+.backbar{display:none}
 
 /* settings */
-section.settings{overflow:auto;padding:22px 26px 60px}
+section.settings{overflow:auto;padding:22px 26px 60px;min-width:0}
 .settings h2{font-family:var(--display);font-size:22px;margin:0 0 4px;font-weight:600}
 .settings .lead{color:var(--ink-2);margin:0 0 18px;max-width:70ch}
-.sgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:16px;align-items:start}
-.card{background:var(--sheet);border:1px solid var(--rule);border-radius:var(--r);padding:16px}
+.sgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(340px,100%),1fr));gap:16px;align-items:start}
+.card{background:var(--sheet);border:1px solid var(--rule);border-radius:var(--r);padding:16px;min-width:0}
 .card h3{font-family:var(--display);font-size:17px;margin:0 0 4px;font-weight:600;display:flex;gap:8px;align-items:center}
 .card .hint{font-size:12.5px;color:var(--ink-2);margin:4px 0 10px;max-width:60ch}
 .field{display:grid;gap:4px;margin:10px 0}
@@ -161,39 +171,49 @@ section.settings{overflow:auto;padding:22px 26px 60px}
 .inline input[type=number]{width:70px}
 .mins{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
 .mins label{display:grid;gap:4px;font-size:12.5px;color:var(--ink-2)}
-.ctry{display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid var(--rule-2)}
+.ctry{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid var(--rule-2)}
 .ctry:last-child{border-bottom:0}
 .ctry.off .nm{color:var(--ink-3);text-decoration:line-through}
 .runs .r{display:flex;justify-content:space-between;gap:12px;padding:5px 0;border-bottom:1px solid var(--rule-2);font-size:12.5px}
 .badge{font:12px var(--body);padding:2px 8px;border-radius:999px;background:var(--rule-2);color:var(--ink-2)}
 .badge.on{background:var(--green-soft);color:var(--green)}
+details.opt summary{cursor:pointer;color:var(--ink-2);font-size:12.5px;margin:6px 0}
 
 /* dialog + toast */
-.modal{position:fixed;inset:0;background:rgba(10,20,22,.45);display:flex;align-items:center;justify-content:center;z-index:50;padding:16px}
-.modal>div{background:var(--sheet);border-radius:var(--r);max-width:720px;width:100%;max-height:92vh;overflow:auto;padding:18px;box-shadow:var(--shadow)}
-.modal h2{font-family:var(--display);margin:0 0 4px;font-weight:600}
-.modal textarea{min-height:280px}
-.toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%) translateY(20px);background:var(--ink);color:var(--paper);padding:9px 14px;border-radius:var(--r);opacity:0;transition:.2s;pointer-events:none;z-index:60;max-width:90vw}
+dialog.send{border:0;border-radius:var(--r);max-width:720px;width:calc(100% - 32px);max-height:92vh;overflow:auto;padding:18px;box-shadow:var(--shadow);background:var(--sheet);color:var(--ink)}
+dialog.send::backdrop{background:rgba(10,20,22,.45)}
+dialog.send h2{font-family:var(--display);margin:0 0 4px;font-weight:600}
+dialog.send textarea{min-height:280px}
+.toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%) translateY(20px);background:var(--ink);color:var(--paper);padding:9px 14px;border-radius:var(--r);opacity:0;transition:.2s;pointer-events:none;z-index:60;max-width:90vw;display:flex;gap:12px;align-items:center}
 .toast.show{opacity:1;transform:translateX(-50%)}
+.toast.act{pointer-events:auto}
+.toast button{background:transparent;border:1px solid var(--paper);color:var(--paper);padding:3px 9px;font-weight:600}
+@media (prefers-reduced-motion:reduce){.toast{transition:none}}
 
 /* narrow screens */
-.back{display:none;margin-bottom:10px}
 @media (max-width:1100px){
-  .body{grid-template-columns:190px 1fr}
-  section.detail{position:fixed;inset:0;z-index:40;background:var(--paper);padding:14px}
+  .body{grid-template-columns:190px minmax(0,1fr)}
+  section.detail{position:fixed;inset:0;z-index:40;background:var(--paper);padding:0 14px 14px}
   section.detail.closed{display:none}
-  .back{display:inline-flex}
+  .backbar{display:flex;position:sticky;top:0;z-index:3;background:var(--paper);padding:10px 0;gap:8px;align-items:center}
+  .tb-actions{top:52px}
 }
 @media (max-width:720px){
-  .body,.body.settings-on{grid-template-columns:1fr}
+  .body,.body.settings-on{grid-template-columns:minmax(0,1fr)}
+  header.top{gap:8px;padding:8px 12px}
+  .brand{font-size:16px}
+  .pill{flex:1 1 auto;max-width:none}
+  .run{flex:1 1 auto;justify-content:flex-end}
   nav.rail{flex-direction:row;overflow-x:auto;border-right:0;border-bottom:1px solid var(--rule);gap:6px;padding:8px}
   .rail h3{display:none}
   .rail .grp{display:flex;gap:4px}
-  .rail button{white-space:nowrap}
+  .rail button{white-space:nowrap;width:auto}
   .tb-grid{grid-template-columns:1fr 1fr}
   .tb-cell:nth-child(3n){border-right:1px solid var(--rule)} .tb-cell:nth-child(2n){border-right:0}
   .verdict .cols{grid-template-columns:1fr}
   .keys{display:none}
+  section.settings{padding:16px 12px 40px}
+  .mins{grid-template-columns:1fr 1fr}
 }
 </style>
 </head>
@@ -215,9 +235,9 @@ section.settings{overflow:auto;padding:22px 26px 60px}
       <div class="grp">
         <h3>Your lists</h3>
         <button data-tab="todo" class="on">To apply <span class="c" id="cTodo">0</span></button>
-        <button data-tab="review">Review <span class="c" id="cReview">0</span></button>
+        <button data-tab="review">Worth a look <span class="c" id="cReview">0</span></button>
         <button data-tab="applied">Applications <span class="c" id="cApplied">0</span></button>
-        <button data-tab="archive">Archived <span class="c" id="cArchive">0</span></button>
+        <button data-tab="archive">Skipped <span class="c" id="cArchive">0</span></button>
       </div>
       <div class="grp">
         <h3>Kind of role</h3>
@@ -235,23 +255,26 @@ section.settings{overflow:auto;padding:22px 26px 60px}
 
     <section class="list" id="listView">
       <div class="filters">
-        <input type="text" id="fText" placeholder="Search title, company, place" aria-label="Search jobs">
+        <input type="text" id="fText" placeholder="Search title, company, place, notes" aria-label="Search jobs">
         <div class="ms" id="msCountry"></div>
-        <div class="ms" id="msSource"></div>
         <div class="levels" id="fLevel" role="group" aria-label="Level">
           <button data-l="">Any level</button><button data-l="starter">Starter</button><button data-l="support">Support</button><button data-l="match">My level</button><button data-l="senior">Senior</button>
         </div>
+        <select id="fSort" aria-label="Sort"><option value="score">Best match</option><option value="date">Newest ad</option><option value="pay">Pay stated first</option><option value="company">Company</option><option value="country">Country</option></select>
+        <button class="quiet small" id="moreF" aria-expanded="false" aria-controls="moreFilters">More filters</button>
+      </div>
+      <div class="filters more" id="moreFilters" hidden>
+        <div class="ms" id="msSource"></div>
         <label class="toggle"><input type="checkbox" id="fPay"> Pay stated</label>
         <label class="toggle"><input type="checkbox" id="fMail"> Apply by e-mail</label>
-        <select id="fDays" aria-label="Found"><option value="">Any time</option><option value="1">Today</option><option value="3">Last 3 days</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option></select>
-        <select id="fSort" aria-label="Sort"><option value="score">Best match</option><option value="date">Newest</option><option value="pay">Pay stated first</option><option value="company">Company</option><option value="country">Country</option></select>
+        <select id="fDays" aria-label="Found"><option value="">Found: any time</option><option value="1">Found today</option><option value="3">Found in the last 3 days</option><option value="7">Found in the last 7 days</option><option value="30">Found in the last 30 days</option></select>
       </div>
-      <div class="listbar"><span id="count"></span><span><button class="quiet small" id="clearF" hidden>Clear filters</button><button class="quiet small" id="skipAll" hidden>Skip all shown</button></span></div>
+      <div class="listbar"><span><span id="count"></span> <button class="quiet small" id="clearF" hidden>Clear filters</button></span><button class="quiet small danger" id="skipAll" hidden>Skip these</button></div>
       <div class="rows" id="rows" role="listbox" aria-label="Jobs"></div>
-      <div class="keys"><kbd>j</kbd> <kbd>k</kbd> next and previous job, <kbd>a</kbd> applied, <kbd>s</kbd> skip, <kbd>o</kbd> open the ad, <kbd>/</kbd> search</div>
+      <div class="keys"><kbd>j</kbd> <kbd>k</kbd> next and previous job, <kbd>a</kbd> applied, <kbd>s</kbd> skip, <kbd>o</kbd> open the ad, <kbd>/</kbd> search, <kbd>Esc</kbd> closes</div>
     </section>
 
-    <section class="detail closed" id="detail"><div class="placeholder"><div><p class="num" style="font-size:20px;color:var(--ink-2);margin:0 0 6px">Pick a job</p><p class="small">Its ad, the AI's reading and your application tools show up here.</p></div></div></section>
+    <section class="detail closed" id="detail"><div class="placeholder"><div><p class="num" style="font-size:20px;color:var(--ink-2);margin:0 0 6px">Pick a job</p><p class="small">Its ad, why it matched and your application tools show up here.</p></div></div></section>
 
     <section class="settings" id="settingsView" hidden>
       <h2>Settings</h2>
@@ -259,81 +282,110 @@ section.settings{overflow:auto;padding:22px 26px 60px}
       <div class="sgrid">
         <div class="card">
           <h3>Where to search</h3>
-          <p class="hint">Search looks for jobs in a country. Apply also writes an application pack for each match there.</p>
+          <p class="hint">Search looks for jobs in a country. "Prepare applications" also writes a cover letter and answers for each match there; with it off, matches show in Worth a look.</p>
           <div id="countries"></div>
-          <p class="small muted" style="margin:14px 0 4px">Minimum match to land in To apply</p>
-          <div class="mins"><label>Civil<input type="number" id="minScore" min="30" max="90" step="5"></label><label>Other roles<input type="number" id="minScoreOther" min="30" max="90" step="5"></label><label>Oil &amp; gas<input type="number" id="minScoreOil" min="30" max="90" step="5"></label></div>
+          <div id="visaBox"></div>
+          <p class="small muted" style="margin:14px 0 4px">Minimum match to land in To apply (30–90)</p>
+          <div class="mins"><label>Civil<input type="number" id="minScore" min="30" max="90" step="5" required></label><label>Other roles<input type="number" id="minScoreOther" min="30" max="90" step="5" required></label><label>Oil &amp; gas<input type="number" id="minScoreOil" min="30" max="90" step="5" required></label></div>
           <div class="inline" style="margin-top:12px"><button class="primary" id="saveSearch" disabled>Save search settings</button><span class="small faint" id="searchDirty"></span></div>
         </div>
         <div class="card">
+          <h3>Your details in letters</h3>
+          <p class="hint">Used in cover letters, e-mails and application forms. Only on this PC - never sent to the AI reviewer.</p>
+          <div class="field"><label for="pName">Full name</label><input type="text" id="pName" maxlength="80" required></div>
+          <div class="field"><label for="pPhone">Phone</label><input type="tel" id="pPhone" maxlength="30" pattern="[+0-9 \(\)\-]{7,30}"></div>
+          <div class="field"><label for="pEmail">E-mail</label><input type="email" id="pEmail" maxlength="120"></div>
+          <div class="field"><label for="pLoc">Where you live</label><input type="text" id="pLoc" maxlength="80" placeholder="Sitra, Bahrain"></div>
+          <div class="field"><label for="pNotice">Notice period</label><input type="text" id="pNotice" maxlength="60" placeholder="30 days"></div>
+          <div class="inline"><button class="primary" id="saveMe" disabled>Save your details</button><span class="small faint">New letters use them; letters already written keep the old ones.</span></div>
+        </div>
+        <div class="card">
           <h3>Daily search</h3>
-          <p class="hint">Each search asks the sites only for ads posted since the last search, so a daily search takes a few minutes. Once a week, or after you change what to search, it does a full search of all recent ads (about 15 minutes). The daily search runs at 07:00 if this computer is on.</p>
-          <div class="inline"><button id="schedBtn">Daily search: …</button><button id="runFull">Run a full search now</button><button id="openFolder">Open data folder</button></div>
+          <p class="hint">Each search asks the sites only for ads posted since the last search, so a daily search takes a few minutes. Once a week, or after you change what to search, it does a full search of all recent ads (about 10 minutes). If the PC is off or asleep at that time, it runs as soon as the PC is on.</p>
+          <div class="inline"><label class="small muted" for="schedHour">Time</label><select id="schedHour"></select><button id="schedBtn">Daily search: …</button></div>
+          <div class="inline" style="margin-top:8px"><button id="runFull">Run a full search now</button><button id="openFolder">Open data folder</button></div>
           <p class="small faint" id="dataDir"></p>
           <div class="runs" id="runs"></div>
         </div>
         <div class="card">
           <h3>AI reviewer <span class="badge" id="aiBadge">off</span></h3>
           <p class="hint">Reads each promising ad the way a recruiter would - real requirements, nationality limits, the level of the role - and writes a one-line verdict. It can also write a cover letter for one ad. Free with a Groq account (no card), or fully private with Ollama on this PC. It never receives your name, phone or e-mail.</p>
-          <div class="field"><label>Provider</label><select id="aiProv"><option value="groq">Groq (free account)</option><option value="ollama">Ollama on this PC (private)</option></select></div>
-          <div class="field" id="aiKeyRow"><label>Groq API key <span class="faint" id="aiKeyState"></span></label><input type="password" id="aiKey" placeholder="gsk_…" autocomplete="off"><span class="small faint">Get one at console.groq.com, under API Keys.</span></div>
-          <div class="field"><label>Model <span class="faint">(empty = the recommended one)</span></label><input type="text" id="aiModel"></div>
-          <div class="field"><label>Ads to read per search</label><input type="number" id="aiMax" min="10" max="900" step="10" value="150"></div>
+          <div class="field"><label for="aiProv">Provider</label><select id="aiProv"><option value="groq">Groq (free account)</option><option value="ollama">Ollama on this PC (private)</option></select></div>
+          <div class="field" id="aiKeyRow"><label for="aiKey">Groq API key <span class="faint" id="aiKeyState"></span></label><input type="password" id="aiKey" placeholder="gsk_…" autocomplete="off"><span class="small faint">Get one at console.groq.com, under API Keys.</span></div>
+          <div class="field"><label for="aiModel">Model <span class="faint">(empty = the recommended one)</span></label><input type="text" id="aiModel" maxlength="100"></div>
+          <div class="field"><label for="aiMax">Ads to read per search (10–900)</label><input type="number" id="aiMax" min="10" max="900" step="10" value="150" required></div>
           <label class="toggle"><input type="checkbox" id="aiOn"> Use the AI reviewer</label>
           <div class="inline" style="margin-top:12px"><button class="primary" id="aiSave">Save AI settings</button><button id="aiTest">Test connection</button><span class="small faint" id="aiUsed"></span></div>
         </div>
-        <div class="card">
+        <div class="card" id="mailCard">
           <h3>E-mail applications</h3>
           <p class="hint">Ads that say "send your CV to …" get a Send application button. It sends from your own address with your CV attached and keeps a copy in the sent folder.</p>
-          <div class="field"><label>Mail provider</label><select id="mPreset"><option value="gmail">Gmail</option><option value="outlook">Outlook.com / Hotmail</option><option value="office365">Microsoft 365 (work)</option><option value="yahoo">Yahoo</option><option value="">Other (SMTP)</option></select></div>
-          <div id="mCustom" hidden><div class="field"><label>SMTP server</label><input type="text" id="mHost" placeholder="smtp.example.com"></div><div class="field"><label>Port</label><input type="number" id="mPort" value="587"></div></div>
-          <div class="field"><label>Your e-mail address</label><input type="email" id="mUser" autocomplete="off"></div>
-          <div class="field"><label>App password <span class="faint" id="mPwState"></span></label><input type="password" id="mPw" placeholder="16-character app password" autocomplete="new-password"><span class="small faint">Not your normal password - create an app password in your mail account's security settings. Stored encrypted for your Windows account.</span></div>
-          <div class="field"><label>Name shown as sender</label><input type="text" id="mName"></div>
+          <div class="field"><label for="mPreset">Mail provider</label><select id="mPreset"><option value="gmail">Gmail</option><option value="outlook">Outlook.com / Hotmail</option><option value="office365">Microsoft 365 (work)</option><option value="yahoo">Yahoo</option><option value="">Other (SMTP)</option></select></div>
+          <div id="mCustom" hidden><div class="field"><label for="mHost">SMTP server</label><input type="text" id="mHost" placeholder="smtp.example.com"></div><div class="field"><label for="mPort">Port</label><input type="number" id="mPort" value="587" min="1" max="65535"></div></div>
+          <div class="field"><label for="mUser">Your e-mail address</label><input type="email" id="mUser" autocomplete="off"></div>
+          <div class="field"><label for="mPw">App password <span class="faint" id="mPwState"></span></label><input type="password" id="mPw" placeholder="16-character app password" autocomplete="new-password"><span class="small faint">Not your normal password - create an app password in your mail account's security settings. Stored encrypted for your Windows account. Changing the provider or address asks for it again.</span></div>
+          <div class="field"><label for="mName">Name shown as sender</label><input type="text" id="mName"></div>
           <label class="toggle"><input type="checkbox" id="mCc"> Send me a copy of every application</label>
-          <div class="field"><label>Your CV, for e-mails and upload boxes <span class="faint" id="mCvState"></span></label><input type="file" id="mCv" accept="application/pdf"></div>
+          <div class="field"><label for="mCv">Your CV, for e-mails and upload boxes <span class="faint" id="mCvState"></span></label><input type="file" id="mCv" accept="application/pdf"></div>
           <div class="inline"><button class="primary" id="mSave">Save e-mail settings</button><button id="mTest">Test sign-in</button></div>
         </div>
         <div class="card">
-          <h3>Job sources</h3>
-          <p class="hint">LinkedIn, SEEK, Rigzone, Gulf Job Paper and the employers' own career sites need nothing. Jooble adds listings from other job boards; each country site needs its own free key from that site's /api/about page. The global jooble.org key mainly covers Canada.</p>
-          <div id="keysBox"></div>
-          <div class="inline" style="margin-top:10px"><button class="primary" id="saveKeys" disabled>Save keys</button></div>
-        </div>
-        <div class="card">
           <h3>Job boards read in your browser</h3>
-          <p class="hint">These sites block programs, so the agent opens their search pages in its own Edge/Chrome window on this computer and reads the job lists, like you browsing. It never clicks, signs in or applies. If a site asks to check you're human, it's skipped for that search and tried again next time. No e-mails needed.</p>
+          <p class="hint">These sites block programs, so the agent opens their search pages in its own Edge/Chrome window on this computer and reads the job lists, like you browsing. It never clicks, signs in or applies. If a site asks to check you're human, it's skipped for that search and tried again next time.</p>
           <div class="inline" id="boardsBox"></div>
           <label class="toggle" style="margin-top:10px"><input type="checkbox" id="bShow"> Show the browser window while it searches</label>
           <div class="inline" style="margin-top:10px"><button class="primary" id="saveBoards" disabled>Save</button></div>
+        </div>
+        <div class="card">
+          <h3>Job sources</h3>
+          <p class="hint">LinkedIn, SEEK, Rigzone, Gulf Job Paper and about 45 employers' own career sites need nothing.</p>
+          <details class="opt"><summary>Optional: Jooble keys for extra listings</summary>
+            <p class="hint">Each Jooble country site needs its own free key from that site's /api/about page. The global jooble.org key mainly covers Canada. Saved keys are never shown again - paste a new one to replace it.</p>
+            <div id="keysBox"></div>
+            <div class="inline" style="margin-top:10px"><button class="primary" id="saveKeys" disabled>Save keys</button></div>
+          </details>
         </div>
       </div>
     </section>
   </div>
 </div>
+<dialog class="send" id="sendDlg" aria-label="Send application"></dialog>
 <div class="toast" id="toast" role="status"></div>
 
 <script>
 (() => {
   const $ = id => document.getElementById(id);
   const TOKEN = "__JOBAGENT_TOKEN__";   // written in by the app each time it starts
-  const STATUSES = ["New","Review","Applied","Interview","Offer","Rejected","Skipped","Found (apply off)"];
-  const TAB_OF = s => ["Applied","Interview","Offer","Rejected"].includes(s) ? "applied" : (s==="New" ? "todo" : (s==="Review" ? "review" : "archive"));
+  const STATUS_LABEL = {"New":"To apply","Review":"Worth a look","Applied":"Applied","Interview":"Interview","Offer":"Offer","Rejected":"Rejected","Skipped":"Skipped","Found (apply off)":"Found (applications off)"};
+  const STATUSES = ["New","Review","Applied","Interview","Offer","Rejected","Skipped"];
+  const APPLIED = ["Applied","Interview","Offer","Rejected"];
+  const TAB_OF = s => APPLIED.includes(s) ? "applied" : (s==="New" ? "todo" : ((s==="Review"||s==="Found (apply off)") ? "review" : "archive"));
   const JOOBLE = [["us","Global (jooble.org)"],["sa","Saudi Arabia"],["ae","UAE"],["qa","Qatar"],["kw","Kuwait"],["om","Oman"],["ca","Canada"],["au","Australia"]];
   const LEVEL_NAME = {starter:"Starter", support:"Support role", match:"My level", senior:"Senior"};
   const OTHER = new Set(["hse","qs_planning","stores_supply","data_reporting"]);
-  let profile=null, keys={}, tracker=[], mail={}, tab="todo", sec="all", view="list", selUrl="", detailCache={}, aiActive=false;
+  const SHORT_NAME = {"United Arab Emirates":"UAE"};
+  const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  let profile=null, keysSet={}, tracker=[], mail={}, tab="todo", sec="all", view="list", selUrl="", detailCache={}, aiActive=false, lastRunAt=null;
   const filt={text:"", countries:new Set(), sources:new Set(), level:"", pay:false, mail:false, days:"", sort:"score"};
-  const today = () => new Date().toISOString().slice(0,10);
+  const localISO = d => new Date(d.getTime()-d.getTimezoneOffset()*6e4).toISOString().slice(0,10);
+  const today = () => localISO(new Date());
+  const niceDate = iso => { const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(iso||""); return m ? `${+m[3]} ${MONTHS[+m[2]-1]}`+(m[1]!==today().slice(0,4)?` ${m[1]}`:"") : ""; };
+  const daysAgo = iso => { const d=Date.parse(iso||""); if(!d) return ""; const n=Math.round((Date.parse(today())-d)/864e5); return n<=0?"today":(n===1?"yesterday":n+" days ago"); };
 
   // ---------- helpers
-  const toast = m => { const t=$("toast"); t.textContent=m; t.classList.add("show"); clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove("show"),2800); };
+  function toast(m, act){
+    const t=$("toast"); t.textContent=""; t.append(document.createTextNode(m));
+    if(act){ const b=document.createElement("button"); b.textContent=act.label; b.addEventListener("click",()=>{ t.classList.remove("show","act"); act.fn(); }); t.append(b); t.classList.add("act"); } else t.classList.remove("act");
+    t.classList.add("show"); clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove("show","act"), act?7000:2800);
+  }
   const esc = s => String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   const safeHref = u => /^https?:\/\//i.test(u||"") ? u : "#";
   const unesc = v => (v && v[0]==="'" && "=+-@\t\r".includes(v[1]||"x")) ? v.slice(1) : v;
-  async function api(path, body){
+  async function api(path, body, opts){
     const h={"X-JobAgent-Token":TOKEN}; if(body) h["Content-Type"]="application/json";
-    const r=await fetch(path, body?{method:"POST",headers:h,body:JSON.stringify(body)}:{headers:h});
+    let r; try{ r=await fetch(path, Object.assign(body?{method:"POST",headers:h,body:JSON.stringify(body)}:{headers:h}, opts||{})); }
+    catch(e){ throw new Error("JobAgent isn't running - start it again"); }
+    if(r.status===403) throw new Error("JobAgent was restarted - press F5 to reload this page");
     const j=await r.json().catch(()=>({}));
     if(!r.ok && !("ok" in j)) throw new Error(j.error||("HTTP "+r.status));
     return j;
@@ -344,6 +396,34 @@ section.settings{overflow:auto;padding:22px 26px 60px}
   const band = s => s>=75?"hi":(s>=55?"mid":"lo");
   const secOf = r => (r.sector==="oil_gas"||r.category==="oil_gas") ? "oil" : (r.category==="site_support" ? "site_support" : (OTHER.has(r.category) ? "other" : "civil"));
   const roleLabel = c => ({civil:"Civil engineering", oil_gas:"Oil & gas", site_support:"Site support"}[c]) || ((profile&&profile.categories||{})[c]||{}).label || c;
+  const isText = el => el && (el.tagName==="TEXTAREA" || (el.tagName==="INPUT" && /^(text|email|password|number|search|tel|url)$/i.test(el.type)));
+
+  // ---------- why a job got its score, in plain words
+  function explain(notes){
+    let n=notes||""; const out=[]; let auto=false;
+    if(n.startsWith("auto: ")){ n=n.slice(6); auto=true; }
+    if(n.startsWith("re-opened (rules updated): ")){ out.push("Re-opened after the matching rules were improved"); n=n.slice(27); }
+    const m=/^AI (\d+): (.*?)(?: \| deal-breakers: (.*?))?(?: \|\| rules: (.*))?$/.exec(n);
+    if(m){ out.push(`AI reader: ${m[2]} (fit ${m[1]})`); if(m[3]) out.push("Deal-breakers: "+m[3]); n=m[4]||""; }
+    const P=[[/^category:/,null],[/^title not in category$/,"Not one of the roles you search for"],[/^target title$/,"The title is one of your target roles"],[/^civil-type engineer title$/,"A civil-type engineering title"],
+      [/^engineer title$/,"An engineering title, not one of your exact targets"],[/^title:(.+)\((-?\d+)\)$/,(x,a,b)=>`The word "${a}" in the title counts against it (${b})`],
+      [/^title rejects/,"The title rules it out (for example a nationals-only role)"],[/^hard reject/,"The ad rules it out (nationals only, closed, or another discipline required)"],
+      [/^posted (\d+) days ago/,(x,a)=>`Posted ${a} days ago - probably closed`],[/^work rights/,"Needs local citizenship, permanent residence or a security clearance"],
+      [/^needs local work rights$/,"Mentions local work rights - usually means no visa sponsorship"],[/^experience fits \((\d+)-(\d+|\+) yrs\)$/,(x,a,b)=>`Asks ${a}${b==="+"?"+":"-"+b} years of experience - fits you`],
+      [/^junior range/,"A junior experience range - you'd be over-qualified, still a real option"],[/^experience close/,"Asks a little more experience than you have"],
+      [/^asks (\d+)\+ (yrs|years)/,(x,a)=>`Asks ${a}+ years of experience`],[/^starter role$/,"A graduate / entry-level role"],
+      [/^industry unclear$/,"Not yet clear it's construction work - the full ad decides"],[/^not construction\/utility\/industrial$/,"Not construction, utility or industrial work"],
+      [/^not clearly civil \/ construction work$/,"The ad doesn't look like civil or construction work"],[/^keywords: (.+)/,(x,a)=>`The ad mentions: ${a}`],
+      [/^listing only$/,"Judged on the job listing only - the full ad wasn't read"],[/^country switched off/,"In a country you've switched off"],
+      [/^location outside/,"Located outside your countries"],[/^country unknown$/,"Country not stated"],[/^wants local candidates$/,"Prefers people already living there"],
+      [/^senior title/,"A senior title - check the years they ask"],[/^needs a work visa/,"You'd need a work visa there and the ad doesn't say they sponsor one"],
+      [/^may sponsor a visa$/,"The ad suggests they can sponsor a visa"],[/^sector:(.+)$/,(x,a)=>a==="oil_gas"?"Oil & gas employer":"Sector: "+a.replace(/_/g," ")],[/^pay: (.+)/,(x,a)=>`Pay stated: ${a}`],
+      [/^apply by e-mail$/,"You can apply by e-mail"]];
+    for(const part of n.split(/;\s*/)){ const p=part.trim(); if(!p) continue; let done=false;
+      for(const [rx,t] of P){ const mm=rx.exec(p); if(mm){ if(t) out.push(typeof t==="function"?t(...mm):t); done=true; break; } }
+      if(!done) out.push(p); }
+    return {auto, lines:out};
+  }
 
   // ---------- CSV
   function parseCSV(text){ const rows=[]; let row=[],f="",q=false; text=text.replace(/^\uFEFF/,""); for(let i=0;i<text.length;i++){const c=text[i]; if(q){ if(c==='"'){ if(text[i+1]==='"'){f+='"';i++;} else q=false; } else f+=c; } else if(c==='"') q=true; else if(c===','){row.push(f);f="";} else if(c==='\n'||c==='\r'){ if(c==='\r'&&text[i+1]==='\n') i++; row.push(f); rows.push(row); row=[]; f=""; } else f+=c; } if(f!==""||row.length){row.push(f);rows.push(row);} const h=rows.shift()||[]; return rows.filter(r=>r.length>1).map(r=>Object.fromEntries(h.map((k,i)=>[k,unesc(r[i]??"")]))); }
@@ -351,59 +431,74 @@ section.settings{overflow:auto;padding:22px 26px 60px}
   // ---------- load
   async function loadAll(keepSel){
     try{
-      const [pf,tr,kf]=await Promise.all([getFile("profile.json"),getFile("tracker.csv"),getFile("keys.json").catch(()=>'{"jooble":{}}')]);
-      profile=JSON.parse(pf); tracker=parseCSV(tr); keys=JSON.parse(kf);
+      const [pf,tr,ks]=await Promise.all([getFile("profile.json"),getFile("tracker.csv"),api("/api/keys").catch(()=>({jooble:{}}))]);
+      profile=JSON.parse(pf); tracker=parseCSV(tr); keysSet=ks.jooble||{};
       tracker.forEach(r=>{ r.category=r.category||"civil"; });
       detailCache={};
-      renderSettings(); renderKeys(); buildFilters(); render(); loadStatus(); loadMail(); loadAI(); loadBoards();
-      if(keepSel&&selUrl) openDetail(selUrl,false);
-    }catch(e){ setState("off","Can't reach the app - start JobAgent again"); toast("Couldn't load: "+e.message); }
+      if(!searchDirty) renderSettings(); if(!meDirty) renderMe(); if(!keysDirty) renderKeys();
+      buildFilters(); render(); loadStatus(); loadMail(); loadAI(); if(!boardsDirty) loadBoards();
+      if(keepSel&&selUrl&&tracker.some(r=>r.url===selUrl)){
+        // the job sheet is rebuilt with the new data - a note being typed keeps its text, cursor and focus
+        const ae=document.activeElement, t=ae&&ae.id==="dNote"?{v:ae.value,a:ae.selectionStart,b:ae.selectionEnd}:null;
+        openDetail(selUrl,false);
+        if(t){ const n=$("dNote"); n.value=t.v; n.focus(); n.setSelectionRange(t.a,t.b); }
+      } else autoPick();
+    }catch(e){ setState("off",e.message); toast("Couldn't load: "+e.message); }
   }
-  let pollT=null, wasRunning=false;
+  let pollT=null;
   async function loadStatus(){
     try{
       const s=await api("/api/status");
-      if(s.running){ const last=(s.log||[]).filter(l=>!/^\[|^http|^pack:|^\s/.test(l)).slice(-1)[0]||"starting"; setState("busy","Searching: "+last); $("runNow").disabled=true; $("runNow").textContent="Searching…"; }
-      else { const lr=(s.runs||[])[0]; setState("ok", lr ? "Last search "+lr.at.slice(0,16).replace("T"," ")+": "+lr.summary.replace(/^\S+:\s*/,"") : "Ready - no search yet"); $("runNow").disabled=false; $("runNow").textContent="Search now"; }
-      $("schedBtn").textContent = s.scheduled ? "Daily search: on at 07:00" : "Daily search: off"; $("schedBtn").dataset.on = s.scheduled?"1":"";
+      const lr=(s.runs||[])[0];
+      if(s.running){ const last=s.elsewhere?"the daily search is running":((s.log||[]).filter(l=>!/^\[|^http|^pack:|^\s/.test(l)).slice(-1)[0]||"starting"); setState("busy","Searching: "+last); $("runNow").disabled=true; $("runFull").disabled=true; $("runNow").textContent="Searching…"; }
+      else { setState("ok", lr ? "Last search "+niceDate(lr.at)+" "+lr.at.slice(11,16)+": "+lr.summary.replace(/^\S+:\s*/,"") : "Ready - no search yet"); $("runNow").disabled=false; $("runFull").disabled=false; $("runNow").textContent="Search now"; }
+      $("schedBtn").textContent = s.scheduled ? "Daily search: on" : "Daily search: off"; $("schedBtn").dataset.on = s.scheduled?"1":"";
+      if(document.activeElement!==$("schedHour")) $("schedHour").value=String(s.schedule_hour??7);
       $("dataDir").textContent = s.data_dir ? "Data folder: "+s.data_dir : "";
-      $("runs").innerHTML=(s.runs||[]).map(r=>`<div class="r"><span class="num">${esc(r.at.slice(0,16).replace("T"," "))}</span><span class="muted">${esc(r.summary.replace(/^\S+:\s*/,""))}</span></div>`).join("");
+      $("runs").innerHTML=(s.runs||[]).map(r=>`<div class="r"><span class="num">${esc(niceDate(r.at)+" "+r.at.slice(11,16))}</span><span class="muted">${esc(r.summary.replace(/^\S+:\s*/,""))}</span></div>`).join("");
       clearTimeout(pollT);
-      if(s.running){ wasRunning=true; pollT=setTimeout(loadStatus,2500); }
-      else if(wasRunning){ wasRunning=false; toast("Search finished - list updated"); loadAll(true); }
-      else pollT=setTimeout(loadStatus,30000);
-    }catch(e){ setState("off","Can't reach the app - start JobAgent again"); }
+      const at=lr?lr.at:"";
+      if(lastRunAt!==null && at!==lastRunAt && !s.running){ toast("Search finished - list updated"); lastRunAt=at; loadAll(true); return; }
+      lastRunAt=at;
+      pollT=setTimeout(loadStatus, s.running?2500:30000);
+    }catch(e){ setState("off",e.message); clearTimeout(pollT); pollT=setTimeout(loadStatus,15000); }
   }
-  async function startSearch(full){ try{ const r=await api("/api/run",{full:!!full}); if(r.ok){ toast(full?"Full search started - about 15 minutes":"Search started - it gets only what's new since the last search"); setTimeout(loadStatus,800); } else toast(r.error||"Couldn't start the search"); }catch(e){ toast("Couldn't start the search: "+e.message); } }
+  async function startSearch(full){ try{ const r=await api("/api/run",{full:!!full}); if(r.ok){ toast(full?"Full search started - about 10 minutes":"Search started - it gets only what's new since the last search"); setTimeout(loadStatus,800); } else toast(r.error||"Couldn't start the search"); }catch(e){ toast("Couldn't start the search: "+e.message); } }
   $("runNow").addEventListener("click",()=>startSearch(false));
   $("runFull").addEventListener("click",()=>startSearch(true));
 
   // ---------- filters
   function multi(id,label,values,set){
-    const el=$(id); el.innerHTML=`<button type="button"><span>${esc(label)}</span><svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.4"/></svg></button><div class="menu"></div>`;
+    const el=$(id); el.innerHTML=`<button type="button" aria-haspopup="true" aria-expanded="false"><span>${esc(label)}</span><svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.4"/></svg></button><div class="menu" role="group" aria-label="${esc(label)}"></div>`;
     const btn=el.querySelector("button"), menu=el.querySelector(".menu");
     const paint=()=>{ btn.querySelector("span").textContent=set.size?[...set].join(", "):label; btn.classList.toggle("set",set.size>0); };
-    el.redraw=counts=>{ menu.innerHTML=values.map(v=>`<label><input type="checkbox" value="${esc(v)}" ${set.has(v)?"checked":""}> ${esc(v)}<span class="n">${counts[v]||0}</span></label>`).join("")||'<span class="faint small">Nothing yet</span>';
-      menu.querySelectorAll("input").forEach(i=>i.addEventListener("change",()=>{ i.checked?set.add(i.value):set.delete(i.value); paint(); render(); })); paint(); };
-    btn.addEventListener("click",e=>{ e.stopPropagation(); document.querySelectorAll(".ms.open").forEach(x=>x!==el&&x.classList.remove("open")); el.classList.toggle("open"); });
+    el.redraw=counts=>{ menu.innerHTML=values.map(v=>`<label><input type="checkbox" value="${esc(v)}" ${set.has(v)?"checked":""}> ${esc(v)}<span class="n">${counts[v]||0}</span></label>`).join("")||'<span class="faint small">Nothing yet</span>'; paint(); };
+    menu.addEventListener("change",e=>{ const i=e.target; if(!i.matches("input")) return; i.checked?set.add(i.value):set.delete(i.value); paint(); render(); });
+    const open=on=>{ el.classList.toggle("open",on); btn.setAttribute("aria-expanded",on?"true":"false");
+      if(on){ document.querySelectorAll(".ms.open").forEach(x=>x!==el&&(x.classList.remove("open"),x.querySelector("button").setAttribute("aria-expanded","false"))); const r=el.getBoundingClientRect(); el.classList.toggle("right", r.left+230>innerWidth); } };
+    btn.addEventListener("click",e=>{ e.stopPropagation(); open(!el.classList.contains("open")); });
+    el.addEventListener("keydown",e=>{ if(e.key==="Escape"&&el.classList.contains("open")){ e.stopPropagation(); open(false); btn.focus(); } });
     menu.addEventListener("click",e=>e.stopPropagation());
   }
-  document.addEventListener("click",()=>document.querySelectorAll(".ms.open").forEach(x=>x.classList.remove("open")));
+  document.addEventListener("click",()=>document.querySelectorAll(".ms.open").forEach(x=>{ x.classList.remove("open"); x.querySelector("button").setAttribute("aria-expanded","false"); }));
   function buildFilters(){
     const uniq=k=>[...new Set(tracker.map(r=>r[k]).filter(Boolean))].sort();
     multi("msCountry","All countries",uniq("country"),filt.countries);
     multi("msSource","All sources",uniq("source"),filt.sources);
   }
-  $("fText").addEventListener("input",()=>{ filt.text=$("fText").value.trim().toLowerCase(); render(); });
-  $("fDays").addEventListener("change",()=>{ filt.days=$("fDays").value; render(); });
-  $("fSort").addEventListener("change",()=>{ filt.sort=$("fSort").value; render(); });
-  $("fPay").addEventListener("change",()=>{ filt.pay=$("fPay").checked; render(); });
-  $("fMail").addEventListener("change",()=>{ filt.mail=$("fMail").checked; render(); });
+  let typeT; $("fText").addEventListener("input",()=>{ clearTimeout(typeT); typeT=setTimeout(()=>{ filt.text=$("fText").value.trim().toLowerCase(); render(); },150); });
+  const after = el => { el.blur(); };      // keyboard shortcuts work again right after using a filter
+  $("fDays").addEventListener("change",e=>{ filt.days=e.target.value; render(); after(e.target); });
+  $("fSort").addEventListener("change",e=>{ filt.sort=e.target.value; render(); after(e.target); });
+  $("fPay").addEventListener("change",e=>{ filt.pay=e.target.checked; render(); after(e.target); });
+  $("fMail").addEventListener("change",e=>{ filt.mail=e.target.checked; render(); after(e.target); });
   $("fLevel").addEventListener("click",e=>{ const b=e.target.closest("button"); if(!b) return; filt.level=b.dataset.l; render(); });
+  $("moreF").addEventListener("click",()=>{ const m=$("moreFilters"); m.hidden=!m.hidden; $("moreF").setAttribute("aria-expanded",m.hidden?"false":"true"); $("moreF").textContent=m.hidden?"More filters":"Fewer filters"; });
   $("clearF").addEventListener("click",()=>{ filt.countries.clear(); filt.sources.clear(); Object.assign(filt,{text:"",level:"",pay:false,mail:false,days:""}); $("fText").value=""; $("fPay").checked=false; $("fMail").checked=false; $("fDays").value=""; buildFilters(); render(); });
 
   // ---------- list
   let shown=[];
+  const adDate = r => r.posted || r.found_date || "";
   function render(){
     document.querySelectorAll("#fLevel button").forEach(b=>b.classList.toggle("on",b.dataset.l===filt.level));
     const inTab=tracker.filter(r=>TAB_OF(r.status)===tab);
@@ -414,42 +509,53 @@ section.settings{overflow:auto;padding:22px 26px 60px}
     const sc={all:inTab.length,civil:0,site_support:0,other:0,oil:0}; inTab.forEach(r=>sc[secOf(r)]++);
     $("sAll").textContent=sc.all; $("sCivil").textContent=sc.civil; $("sSupport").textContent=sc.site_support; $("sOther").textContent=sc.other; $("sOil").textContent=sc.oil;
     const base=inTab.filter(r=>sec==="all"||secOf(r)===sec);
-    const cutoff=filt.days?new Date(Date.now()-(+filt.days-1)*864e5).toISOString().slice(0,10):"";
+    const cutoff=filt.days?localISO(new Date(Date.now()-(+filt.days-1)*864e5)):"";
     const pass=r=>(!filt.countries.size||filt.countries.has(r.country))&&(!filt.sources.size||filt.sources.has(r.source))&&(!filt.level||(r.level||"match")===filt.level)
       &&(!filt.pay||r.salary)&&(!filt.mail||r.apply_email)&&(!cutoff||(r.found_date||"")>=cutoff)
-      &&(!filt.text||(r.title+" "+r.company+" "+r.location+" "+r.country).toLowerCase().includes(filt.text));
+      &&(!filt.text||(r.title+" "+r.company+" "+r.location+" "+r.country+" "+(r.user_notes||"")).toLowerCase().includes(filt.text));
     shown=base.filter(pass);
     const cnt=k=>base.reduce((m,r)=>(m[r[k]]=(m[r[k]]||0)+1,m),{});
     $("msCountry").redraw(cnt("country")); $("msSource").redraw(cnt("source"));
-    const ST=s=>["Interview","Offer","Applied","Rejected"].indexOf(s);
-    const S={score:(a,b)=>(+b.score)-(+a.score)||(b.found_date||"").localeCompare(a.found_date||""), date:(a,b)=>(b.found_date||"").localeCompare(a.found_date||"")||(+b.score)-(+a.score),
+    const ST=s=>["Offer","Interview","Applied","Rejected"].indexOf(s);
+    const S={score:(a,b)=>(+b.score)-(+a.score)||adDate(b).localeCompare(adDate(a)), date:(a,b)=>adDate(b).localeCompare(adDate(a))||(+b.score)-(+a.score),
       pay:(a,b)=>((b.salary?1:0)-(a.salary?1:0))||(+b.score)-(+a.score), company:(a,b)=>a.company.localeCompare(b.company), country:(a,b)=>(a.country||"").localeCompare(b.country||"")||(+b.score)-(+a.score)};
     shown.sort(tab==="applied" ? ((a,b)=>ST(a.status)-ST(b.status)||(b.applied_date||"").localeCompare(a.applied_date||"")) : (S[filt.sort]||S.score));
+    $("fSort").hidden=tab==="applied";
     const anyFilter=filt.countries.size||filt.sources.size||filt.level||filt.pay||filt.mail||filt.days||filt.text;
-    $("clearF").hidden=!anyFilter; $("skipAll").hidden=!(tab==="todo"&&shown.length&&anyFilter);
+    $("clearF").hidden=!anyFilter;
+    const canSkip=(tab==="todo"||tab==="review")&&shown.length&&anyFilter;
+    $("skipAll").hidden=!canSkip; $("skipAll").textContent=`Skip these ${shown.length}`;
     $("count").textContent=`${shown.length} of ${base.length} shown`;
     const box=$("rows");
     if(!shown.length){
       box.innerHTML = base.length ? `<div class="empty"><b>No job matches these filters</b>Clear a filter to see more.</div>`
-        : `<div class="empty"><b>${{todo:"Nothing waiting to apply",review:"Nothing to review",applied:"No applications yet",archive:"Nothing archived"}[tab]}</b>${tab==="todo"?(tracker.length?"New matches arrive with the next search.":"Press Search now to look for jobs."):(tab==="applied"?"Jobs you mark as applied appear here, grouped by stage.":"")}</div>`;
+        : `<div class="empty"><b>${{todo:"Nothing waiting to apply",review:"Nothing to look at",applied:"No applications yet",archive:"Nothing skipped"}[tab]}</b>${tab==="todo"?(tracker.length?"New matches arrive with the next search.":"Press Search now to look for jobs."):(tab==="applied"?"Jobs you mark as applied appear here, grouped by stage.":"")}</div>`;
       return;
     }
     let html="", lastGroup="";
     shown.forEach((r,i)=>{
       if(tab==="applied"&&r.status!==lastGroup){ html+=`<div class="group">${esc(r.status)}</div>`; lastGroup=r.status; }
       const s=+r.score||0, isNew=r.found_date===today()&&r.status==="New";
-      const tags=[isNew?'<span class="tag new">New today</span>':"", r.level&&r.level!=="match"?`<span class="tag lv-${esc(r.level)}">${esc(LEVEL_NAME[r.level]||r.level)}</span>`:"",
+      const bad=/deal-breakers:/.test(r.notes||"");
+      const tags=[isNew?'<span class="tag new">New today</span>':"", bad?'<span class="tag bad">Deal-breaker</span>':"", r.level&&r.level!=="match"?`<span class="tag lv-${esc(r.level)}">${esc(LEVEL_NAME[r.level]||r.level)}</span>`:"",
         r.salary?`<span class="tag pay">${esc(r.salary)}</span>`:"", r.apply_email?'<span class="tag mail">Apply by e-mail</span>':"",
         secOf(r)==="oil"&&sec!=="oil"?'<span class="tag og">Oil &amp; gas</span>':"", (sec==="all"||sec==="other")&&secOf(r)!=="oil"?`<span class="tag">${esc(roleLabel(r.category))}</span>`:"",
         r.ai_fit?`<span class="tag ai" title="${esc(r.ai_summary||"")}">AI ${esc(r.ai_fit)}</span>`:""].join("");
-      html+=`<div class="row${r.url===selUrl?" sel":""}" role="option" aria-selected="${r.url===selUrl}" data-i="${i}">
-        <div class="sc ${band(s)}">${s}<small>match</small></div>
-        <div><div class="rt">${esc(r.title)}</div><div class="rm"><span>${esc(r.company)}</span><span>${esc(r.location||r.country)}</span><span>${esc(r.source)}</span></div><div class="tags">${tags}</div></div>
-        <div class="rs">${tab!=="todo"?`<span class="st ${esc(r.status.split(" ")[0])}">${esc(r.status)}</span><br>`:""}${esc((r.applied_date||r.found_date||"").slice(5))}</div></div>`;
+      let line="";
+      if(tab==="archive"){ const ex=explain(r.notes); line = r.touched&&!ex.auto ? "Skipped by you" : "Skipped by the agent: "+(ex.lines.filter(x=>!/^The title is one of|^The ad mentions/.test(x))[0]||"low match"); }
+      else if(r.user_notes) line="Note: "+r.user_notes;
+      const right = tab==="applied" ? `<span class="st ${esc(r.status.split(" ")[0])}">${esc(r.status)}</span><br>${esc(r.applied_date?"Applied "+niceDate(r.applied_date):"")}${r.applied_date?`<br><span class="faint">${esc(daysAgo(r.applied_date))}</span>`:""}`
+        : (tab!=="todo"?`<span class="st ${esc(r.status.split(" ")[0])}">${esc(STATUS_LABEL[r.status]||r.status)}</span><br>`:"")+esc(r.posted?"Ad "+niceDate(r.posted):"Found "+niceDate(r.found_date));
+      html+=`<div class="row${r.url===selUrl?" sel":""}" role="option" tabindex="0" aria-selected="${r.url===selUrl}" data-i="${i}">
+        <div class="sc ${tab==="archive"?"":band(s)}">${s}<small>match</small></div>
+        <div style="min-width:0"><div class="rt">${esc(r.title)}</div><div class="rm"><span>${esc(r.company)}</span><span>${esc(r.location||r.country)}</span><span>${esc(r.source)}</span></div>${line?`<div class="rn" title="${esc(line)}">${esc(line)}</div>`:""}<div class="tags">${tags}</div></div>
+        <div class="rs">${right}</div></div>`;
     });
     box.innerHTML=html;
-    box.querySelectorAll(".row").forEach(el=>el.addEventListener("click",()=>openDetail(shown[+el.dataset.i].url,true)));
   }
+  function markSel(){ $("rows").querySelectorAll(".row").forEach(el=>{ const on=shown[+el.dataset.i]&&shown[+el.dataset.i].url===selUrl; el.classList.toggle("sel",on); el.setAttribute("aria-selected",on?"true":"false"); }); }
+  $("rows").addEventListener("click",e=>{ const el=e.target.closest(".row"); if(el) openDetail(shown[+el.dataset.i].url,true); });
+  $("rows").addEventListener("keydown",e=>{ if(e.key==="Enter"){ const el=e.target.closest(".row"); if(el){ e.preventDefault(); openDetail(shown[+el.dataset.i].url,true); } } });
   function showView(){
     document.querySelectorAll(".rail [data-tab]").forEach(x=>x.classList.toggle("on",x.dataset.tab===tab&&view==="list"));
     document.querySelectorAll(".rail [data-sec]").forEach(x=>x.classList.toggle("on",x.dataset.sec===sec&&view==="list"));
@@ -463,38 +569,73 @@ section.settings{overflow:auto;padding:22px 26px 60px}
     else { view="list"; if(b.dataset.tab) tab=b.dataset.tab; if(b.dataset.sec) sec=b.dataset.sec; }
     showView();
     try{ localStorage.setItem("ja-nav",JSON.stringify({tab,sec})); }catch(_){}
-    render();
+    render(); autoPick();
+  });
+  // a list never shows a job from another list beside it: on a wide screen the first job of the new list opens
+  const PLACEHOLDER=$("detail").innerHTML;
+  const wide = () => !matchMedia("(max-width:1100px)").matches;
+  function autoPick(){
+    if(view!=="list" || shown.some(r=>r.url===selUrl)) return;
+    if(shown.length && wide()) openDetail(shown[0].url,true);
+    else { selUrl=""; pendingNote=null; $("detail").innerHTML=PLACEHOLDER; $("detail").classList.add("closed"); }
+  }
+  function openSettings(cardId){ view="settings"; showView(); render(); const c=cardId&&$(cardId); if(c) setTimeout(()=>c.scrollIntoView({block:"start"}),0); }
+
+  // ---------- saving job changes (instant, with Undo)
+  async function edit(r,patch,msg,undo){
+    const before={}; Object.keys(patch).forEach(k=>before[k]=r[k]??"");
+    Object.assign(r,patch); render(); if(r.url===selUrl) paintHead(r);
+    try{ const res=await api("/api/edits",{edits:{[r.url]:patch}}); if(res.ok===false) throw new Error(res.error||"not saved");
+      if(msg) toast(msg, undo?{label:"Undo",fn:()=>edit(r,before,"Undone")}:null); return true; }
+    catch(e){ Object.assign(r,before); render(); if(r.url===selUrl) paintHead(r); toast("Not saved: "+e.message); return false; }
+  }
+  function setStatus(r,s){
+    const patch={status:s};
+    if(["Applied","Interview","Offer"].includes(s)) patch.applied_date=r.applied_date||today();
+    else if(s!=="Rejected") patch.applied_date="";           // moved back: it wasn't applied for after all
+    return edit(r,patch, s==="Applied"?"Moved to Applications":(s==="Skipped"?"Skipped":"Moved to "+(STATUS_LABEL[s]||s)), true);
+  }
+  function nextAfter(r){ const i=shown.findIndex(x=>x.url===r.url); return i>=0 ? (shown[i+1]||shown[i-1]||null) : null; }
+  async function setStatusAndMove(r,s){ const next=nextAfter(r); await setStatus(r,s); if(next&&TAB_OF(s)!==tab) openDetail(next.url,true); }
+  $("skipAll").addEventListener("click",async()=>{
+    const list=[...shown]; if(!list.length) return;
+    if(!confirm(`Skip all ${list.length} jobs shown? They move to Skipped - you can undo right after.`)) return;
+    const edits={}, before={}; list.forEach(r=>{ before[r.url]=r.status; r.status="Skipped"; edits[r.url]={status:"Skipped"}; });
+    render(); const sel=tracker.find(x=>x.url===selUrl); if(sel) paintHead(sel);
+    try{ await api("/api/edits",{edits});
+      toast(list.length+" jobs skipped",{label:"Undo",fn:async()=>{ const back={}; list.forEach(r=>{ r.status=before[r.url]; back[r.url]={status:before[r.url]}; }); render(); if(sel) paintHead(sel); try{ await api("/api/edits",{edits:back}); toast("Undone"); }catch(e){ toast("Not undone: "+e.message); } }}); }
+    catch(e){ list.forEach(r=>r.status=before[r.url]); render(); toast("Not saved: "+e.message); }
   });
 
-  // ---------- saving job changes (instant)
-  async function edit(r,patch,msg){
-    Object.assign(r,patch);
-    try{ await api("/api/edits",{edits:{[r.url]:patch}}); if(msg) toast(msg); }
-    catch(e){ toast("Not saved: "+e.message); }
-    render(); if(r.url===selUrl) paintHead(r);
-  }
-  const setStatus=(r,s)=>edit(r,{status:s, applied_date:["Applied","Interview","Offer"].includes(s)?(r.applied_date||today()):(r.applied_date||"")},
-      s==="Applied"?"Moved to Applications":(s==="Skipped"?"Skipped - it's in Archived":"Status: "+s));
-  $("skipAll").addEventListener("click",async()=>{ const list=[...shown]; if(!list.length) return; const edits={}; list.forEach(r=>{ r.status="Skipped"; edits[r.url]={status:"Skipped"}; }); try{ await api("/api/edits",{edits}); toast(list.length+" jobs skipped"); }catch(e){ toast("Not saved: "+e.message); } render(); });
-
   // ---------- detail sheet
+  function closeDetail(){ $("detail").classList.add("closed"); if(history.state&&history.state.ja) history.back(); }
+  window.addEventListener("popstate",()=>{ if(!$("detail").classList.contains("closed")) $("detail").classList.add("closed"); });
   async function openDetail(url, scroll){
     selUrl=url; const r=tracker.find(x=>x.url===url); if(!r) return;
-    render(); $("detail").classList.remove("closed");
+    markSel();
+    const wasClosed=$("detail").classList.contains("closed"); $("detail").classList.remove("closed");
+    if(wasClosed && matchMedia("(max-width:1100px)").matches) history.pushState({ja:1},"");
     const d=$("detail");
-    const cells=[["Location",r.location||r.country],["Country",r.country||"Unknown"],["Posted",r.posted||"Not stated"],["Found",r.found_date],["Level",LEVEL_NAME[r.level]||"Not judged"],["Pay",r.salary||"Not stated"],["Role",roleLabel(r.category)],["Source",r.source],["Apply by e-mail",r.apply_email||"No"]];
-    d.innerHTML=`<button class="back" id="back">Back to the list</button><div class="sheet">
+    const cells=[["Location",r.location||r.country],["Country",r.country||"Unknown"],["Ad posted",r.posted?niceDate(r.posted):"Not stated"],["Found",niceDate(r.found_date)],["Level",LEVEL_NAME[r.level]||"Not judged"],["Pay",r.salary||"Not stated"],["Role",roleLabel(r.category)],["Source",r.source],["Apply by e-mail",r.apply_email||"No"]];
+    const ex=explain(r.notes);
+    d.innerHTML=`<div class="backbar"><button id="back">Back to the list</button><span class="small faint">or press Esc</span></div><div class="sheet">
       <div class="tb-head"><div class="tb-title"><h1>${esc(r.title)}</h1><div class="co">${esc(r.company)}</div></div>
         <div class="tb-score"><div class="big ${band(+r.score)}">${esc(r.score)}</div><div class="how" id="dHow">match</div></div></div>
+      <div class="tb-actions" id="dActions"></div>
       <div class="tb-grid">${cells.map(([k,v])=>`<div class="tb-cell"><div class="k">${k}</div><div class="v" title="${esc(v)}">${esc(v)}</div></div>`).join("")}</div>
       <div id="dVerdict"></div>
-      <div class="part"><div class="top"><h4>Your note</h4></div><input type="text" class="note-in" id="dNote" placeholder="For example: called HR on Sunday, interview Tuesday" value="${esc(r.user_notes||"")}"></div>
+      <div class="part why"><h4>Why this score</h4><ul title="${esc(r.notes)}">${ex.lines.map(x=>`<li>${esc(x)}</li>`).join("")}</ul></div>
+      <div class="part"><div class="top"><h4><label for="dNote">Your note</label></h4><span class="small faint" id="noteState"></span></div><textarea class="note-in" id="dNote" rows="2" maxlength="2000" placeholder="For example: called HR on Sunday, interview Tuesday">${esc(r.user_notes||"")}</textarea></div>
       <div class="part" id="dAd"><div class="top"><h4>The ad</h4><a href="${esc(safeHref(r.url))}" target="_blank" rel="noopener noreferrer">Open the original</a></div><div class="faint small" id="adWait">Loading…</div></div>
-      <div class="part" id="dPack" hidden></div>
-      <div class="part"><div class="why">How the match was worked out: ${esc(r.notes)}</div></div>
-      <div class="tb-actions" id="dActions"></div></div>`;
-    $("back").addEventListener("click",()=>{ $("detail").classList.add("closed"); });
-    let nt; $("dNote").addEventListener("input",e=>{ clearTimeout(nt); nt=setTimeout(()=>edit(r,{user_notes:e.target.value},"Note saved"),700); });
+      <div class="part" id="dPack" hidden></div></div>`;
+    $("back").addEventListener("click",closeDetail);
+    const note=$("dNote"); let nt=null, saved=r.user_notes||"";
+    const saveNote=async(keepalive)=>{ clearTimeout(nt); const v=note.value; if(v===saved) return; saved=v;
+      if(keepalive){ try{ fetch("/api/edits",{method:"POST",keepalive:true,headers:{"X-JobAgent-Token":TOKEN,"Content-Type":"application/json"},body:JSON.stringify({edits:{[r.url]:{user_notes:v}}})}); r.user_notes=v; }catch(_){} return; }
+      $("noteState").textContent="Saving…"; const ok=await edit(r,{user_notes:v}); $("noteState").textContent=ok?"Saved":"Not saved - try again"; if(!ok) saved=null; };
+    note.addEventListener("input",()=>{ clearTimeout(nt); $("noteState").textContent=""; nt=setTimeout(()=>saveNote(false),700); });
+    note.addEventListener("blur",()=>saveNote(false));
+    pendingNote=()=>saveNote(true);
     paintHead(r);
     if(scroll) d.scrollTop=0;
     let j=detailCache[url];
@@ -502,15 +643,20 @@ section.settings{overflow:auto;padding:22px 26px 60px}
     if(selUrl!==url) return;
     paintVerdict(r,j); paintAd(j); paintPack(r,j);
   }
+  let pendingNote=null;
+  window.addEventListener("pagehide",()=>{ if(pendingNote) pendingNote(); });
   function paintHead(r){
     const a=$("dActions"); if(!a) return;
     const done=TAB_OF(r.status)==="applied";
+    const opts=STATUSES.concat(r.status==="Found (apply off)"?["Found (apply off)"]:[]);
     a.innerHTML=`${!done?'<button class="primary" id="aSite">Apply on site</button>':""}${r.apply_email&&!done?'<button id="aMail">Send application by e-mail</button>':""}
       ${!done?'<button id="aDone">I applied</button>':""}${r.status!=="Skipped"&&!done?'<button class="quiet" id="aSkip">Skip</button>':""}
-      <select id="aStatus" aria-label="Status">${STATUSES.map(s=>`<option ${s===r.status?"selected":""}>${s}</option>`).join("")}</select>`;
+      ${done?'<button id="aInt">Interview</button><button id="aOffer">Offer</button><button class="quiet" id="aRej">Rejected</button>':""}
+      <span class="stat"><label for="aStatus">Status:</label><select id="aStatus">${opts.map(s=>`<option value="${esc(s)}" ${s===r.status?"selected":""}>${esc(STATUS_LABEL[s]||s)}</option>`).join("")}</select></span>`;
     const on=(id,fn)=>{ const b=$(id); if(b) b.addEventListener("click",fn); };
-    on("aDone",()=>setStatus(r,"Applied")); on("aSkip",()=>setStatus(r,"Skipped")); on("aMail",()=>openSend(r)); on("aSite",()=>applySite(r));
-    $("aStatus").addEventListener("change",e=>setStatus(r,e.target.value));
+    on("aDone",()=>setStatusAndMove(r,"Applied")); on("aSkip",()=>setStatusAndMove(r,"Skipped")); on("aMail",()=>openSend(r)); on("aSite",()=>applySite(r));
+    on("aInt",()=>setStatus(r,"Interview")); on("aOffer",()=>setStatus(r,"Offer")); on("aRej",()=>setStatus(r,"Rejected"));
+    $("aStatus").addEventListener("change",e=>{ const s=e.target.value; e.target.blur(); setStatusAndMove(r,s); });
   }
   function paintVerdict(r,j){
     const ai=j.ai||{}, v=$("dVerdict"); if(!v) return;
@@ -520,7 +666,7 @@ section.settings{overflow:auto;padding:22px 26px 60px}
     v.innerHTML=`<div class="verdict"><p><b>${esc(ai.summary||"")}</b></p>
       ${ai.deal_breakers&&ai.deal_breakers.length?`<p class="bad">Deal-breakers: ${esc(ai.deal_breakers.join("; "))}</p>`:""}
       <div class="cols"><div><h4>In your favour</h4>${li(ai.strengths)}</div><div><h4>Gaps</h4>${li(ai.gaps)}</div></div>
-      <p class="faint small" style="margin-top:8px">Read by ${esc(ai.model||"the AI")} on ${esc(ai.on||"")}${ai.years_required!=null?`. Asks for ${esc(ai.years_required)} years`:""}</p></div>`;
+      <p class="faint small" style="margin-top:8px">Read by ${esc(ai.model||"the AI")} on ${esc(niceDate(ai.on)||"")}${ai.years_required!=null?`. Asks for ${esc(ai.years_required)} years`:""}</p></div>`;
   }
   function paintAd(j){
     const el=$("dAd"); if(!el) return;
@@ -530,15 +676,20 @@ section.settings{overflow:auto;padding:22px 26px 60px}
     el.appendChild(body);
   }
   function packSec(md,n){ const m=md.match(new RegExp("## "+n.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+"\\n+([\\s\\S]*?)(?=\\n## |$)")); return m?m[1].trim():""; }
-  function paintPack(r,j){
+  const unmd = s => s.replace(/\\([\[\]<>`])/g,"$1");
+  async function paintPack(r,j){
     const el=$("dPack"); if(!el) return;
-    const md=j.pack||"", letter=(j.letter_ai||packSec(md,"Cover letter")).replace(/^\d{1,2} \w+ \d{4}\n+/,""), summary=packSec(md,"CV summary for this application");
-    const answers=[...packSec(md,"Draft screening answers").matchAll(/\*\*Q:\*\* (.+?)\n\*\*A:\*\* ([\s\S]+?)(?=\n\n\*\*Q|\s*$)/g)].map(m=>({q:m[1].trim(),a:m[2].trim()}));
+    const md=j.pack||""; let letter=unmd((j.letter_ai||packSec(md,"Cover letter")).replace(/^\d{1,2} \w+ \d{4}\n+/,"")), standard=false;
+    const summary=unmd(packSec(md,"CV summary for this application"));
+    const answers=[...packSec(md,"Draft screening answers").matchAll(/\*\*Q:\*\* (.+?)\n\*\*A:\*\* ([\s\S]+?)(?=\n\n\*\*Q|\s*$)/g)].map(m=>({q:unmd(m[1].trim()),a:m[2].trim()}));
+    if(!letter){ try{ const d=await api("/api/draft?url="+encodeURIComponent(r.url)); letter=d.body||""; standard=true; }catch(_){} }
+    if(selUrl!==r.url) return;
     el.hidden=false;
-    el.innerHTML=`<div class="top"><h4>${j.letter_ai?"Cover letter, written by AI for this ad":"Cover letter"}</h4><span class="inline">${aiActive?'<button class="quiet small" id="pAi">'+(j.letter_ai?"Rewrite with AI":"Write with AI for this ad")+'</button>':""}${letter?'<button class="quiet small" data-copy="pl">Copy</button>':""}</span></div>
-      ${letter?`<pre class="letter" id="pl">${esc(letter)}</pre>`:'<p class="faint small">No letter yet - letters are prepared for jobs in To apply.'+(aiActive?" You can also write one with AI.":"")+'</p>'}
+    el.innerHTML=`<div class="top"><h4>${j.letter_ai?"Cover letter, written by AI for this ad":(standard?"Standard letter":"Cover letter")}</h4><span class="inline">${aiActive?'<button class="quiet small" id="pAi">'+(j.letter_ai?"Rewrite with AI":"Write with AI for this ad")+'</button>':""}${letter?'<button class="quiet small" data-copy="pl">Copy</button>':""}</span></div>
+      ${letter?`<pre class="letter" id="pl">${esc(letter)}</pre>`:'<p class="faint small">No letter yet.'+(aiActive?" You can write one with AI.":"")+'</p>'}
+      ${standard?'<p class="faint small" style="margin-top:6px">A general letter - jobs in To apply get one written for their ad at the next search.</p>':""}
       ${summary?`<div class="top" style="margin-top:14px"><h4>CV summary</h4><button class="quiet small" data-copy="ps">Copy</button></div><p id="ps" style="margin:0;max-width:72ch">${esc(summary)}</p>`:""}
-      ${answers.length?`<div class="top" style="margin-top:14px"><h4>Answers to the ad's questions</h4></div>${answers.map(a=>`<p style="margin:6px 0 2px"><b>${esc(a.q)}</b></p><p style="margin:0">${esc(a.a)}</p>`).join("")}`:""}`;
+      ${answers.length?`<div class="top" style="margin-top:14px"><h4>Answers to the ad's questions</h4></div>${answers.map((a,i)=>`<div class="qa"><div class="q"><b>${esc(a.q)}</b><button class="quiet small" data-copy="qa${i}">Copy</button></div><div id="qa${i}">${esc(a.a)}</div></div>`).join("")}`:""}`;
     el.querySelectorAll("[data-copy]").forEach(b=>b.addEventListener("click",()=>{ navigator.clipboard.writeText($(b.dataset.copy).textContent).then(()=>toast("Copied")).catch(()=>toast("Copy is blocked - select the text instead")); }));
     const pa=$("pAi"); if(pa) pa.addEventListener("click",async()=>{ pa.disabled=true; pa.textContent="Writing…"; try{ const res=await api("/api/ai-letter",{url:r.url}); if(res.ok){ j.letter_ai=res.letter; detailCache[r.url]=j; paintPack(r,j); toast("Letter written - read it before you send it"); } else { toast(res.error||"Couldn't write the letter"); pa.disabled=false; pa.textContent="Write with AI for this ad"; } }catch(e){ toast(e.message); pa.disabled=false; pa.textContent="Write with AI for this ad"; } });
   }
@@ -546,7 +697,7 @@ section.settings{overflow:auto;padding:22px 26px 60px}
   // ---------- apply on site / e-mail
   async function applySite(r){
     const b=$("aSite"); if(b){ b.disabled=true; b.textContent="Opening…"; }
-    try{ const res=await api("/api/apply-site",{url:r.url}); toast(res.ok?("Opened in the apply window"+(res.cv?"":" - add your CV in Settings so it can be attached")):(res.error||"Couldn't open it")); if(res.ok) watchApply(r); }
+    try{ const res=await api("/api/apply-site",{url:r.url}); if(res.ok){ const noCv=res.cv===false; toast((res.message==="already open in the apply window"?"Already open in the apply window":"Opened in the apply window")+(noCv?" - add your CV in Settings so it can be attached":""), noCv?{label:"Open settings",fn:()=>openSettings("mailCard")}:null); watchApply(r); } else toast(res.error||"Couldn't open it"); }
     catch(e){ toast("Couldn't open it: "+e.message); }
     if(b){ b.disabled=false; b.textContent="Apply on site"; }
   }
@@ -555,73 +706,114 @@ section.settings{overflow:auto;padding:22px 26px 60px}
     clearTimeout(applyT);
     const tick=async()=>{ try{ const s=(await api("/api/apply-status"))[r.url]; if(!s) return;
       const last=s.log[s.log.length-1]||""; if(last) setState("busy","Apply window: "+last);
-      if(s.done||s.stopped){ const row=parseCSV(await getFile("tracker.csv")).find(x=>x.url===r.url); if(row&&row.status!==r.status){ Object.assign(r,{status:row.status,applied_date:row.applied_date}); render(); if(r.url===selUrl) paintHead(r); toast("Marked as "+row.status); } loadStatus(); return; }
+      if(s.done||s.stopped){ const row=parseCSV(await getFile("tracker.csv")).find(x=>x.url===r.url); if(row&&row.status!==r.status){ Object.assign(r,{status:row.status,applied_date:row.applied_date}); render(); if(r.url===selUrl) paintHead(r); toast("Marked as "+(STATUS_LABEL[row.status]||row.status)); } loadStatus(); return; }
       applyT=setTimeout(tick,2500); }catch(_){ } };
     applyT=setTimeout(tick,2000);
   }
   async function openSend(r){
-    if(!mail.has_password||!mail.user){ toast("Set up e-mail in Settings first"); return; }
-    if(!mail.has_cv){ toast("Add your CV in Settings first"); return; }
+    if(!mail.has_password||!mail.user){ toast("Set up e-mail sending first",{label:"Open settings",fn:()=>openSettings("mailCard")}); return; }
+    if(!mail.has_cv){ toast("Add your CV first",{label:"Open settings",fn:()=>openSettings("mailCard")}); return; }
     let d; try{ d=await api("/api/draft?url="+encodeURIComponent(r.url)); }catch(e){ toast("Couldn't prepare the e-mail: "+e.message); return; }
-    const m=document.createElement("div"); m.className="modal";
-    m.innerHTML=`<div role="dialog" aria-modal="true" aria-label="Send application"><h2>Send application</h2><p class="muted small">${esc(r.title)} at ${esc(r.company)}. Edit anything, then send. ${esc(mail.cv_name||"CV.pdf")} is attached.</p>
+    const dlg=$("sendDlg");
+    dlg.innerHTML=`<h2>Send application</h2><p class="muted small">${esc(r.title)} at ${esc(r.company)}. Edit anything, then send. ${esc(mail.cv_name||"CV.pdf")} is attached.</p>
       <div class="field"><label for="sTo">To</label><input type="text" id="sTo" value="${esc(d.to)}"></div><div class="field"><label for="sSub">Subject</label><input type="text" id="sSub" value="${esc(d.subject)}"></div>
       <div class="field"><label for="sBody">Message</label><textarea id="sBody">${esc(d.body)}</textarea></div>
-      <div class="inline" style="justify-content:flex-end"><button id="sCancel">Cancel</button><button class="primary" id="sSend">Send application</button></div></div>`;
-    document.body.appendChild(m); $("sTo").focus();
-    const close=()=>m.remove();
-    $("sCancel").addEventListener("click",close); m.addEventListener("click",e=>{ if(e.target===m) close(); });
-    m.addEventListener("keydown",e=>{ if(e.key==="Escape") close(); });
+      <div class="inline" style="justify-content:flex-end"><button id="sCancel">Cancel</button><button class="primary" id="sSend">Send application</button></div>`;
+    const orig=[d.to,d.subject,d.body].join("\u0000");
+    const changed=()=>[$("sTo").value,$("sSub").value,$("sBody").value].join("\u0000")!==orig;
+    const close=()=>{ if(changed()&&!confirm("Close and lose your changes to this e-mail?")) return false; dlg.close(); return true; };
+    dlg.oncancel=e=>{ e.preventDefault(); close(); };
+    $("sCancel").addEventListener("click",close);
+    dlg.showModal(); $("sTo").focus();
     $("sSend").addEventListener("click",async()=>{ const b=$("sSend"); b.disabled=true; b.textContent="Sending…";
       try{ const res=await api("/api/send",{url:r.url,to:$("sTo").value.trim(),subject:$("sSub").value.trim(),body:$("sBody").value});
-        if(res.ok){ close(); Object.assign(r,{status:"Applied",applied_date:r.applied_date||today()}); render(); paintHead(r); toast("Application sent to "+res.to); } else { toast(res.error||"Not sent"); b.disabled=false; b.textContent="Send application"; } }
+        if(res.ok){ dlg.close(); Object.assign(r,{status:"Applied",applied_date:r.applied_date||today()}); render(); paintHead(r); toast("Application sent to "+res.to); } else { toast(res.error||"Not sent"); b.disabled=false; b.textContent="Send application"; } }
       catch(e){ toast("Not sent: "+e.message); b.disabled=false; b.textContent="Send application"; } });
   }
 
   // ---------- keyboard
   document.addEventListener("keydown",e=>{
-    if(view!=="list"||e.ctrlKey||e.metaKey||e.altKey||document.querySelector(".modal")) return;
-    if(/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)){ if(e.key==="Escape") document.activeElement.blur(); return; }
+    if(e.key==="Escape"&&!$("sendDlg").open){
+      if(isText(document.activeElement)){ document.activeElement.blur(); return; }
+      if(!$("detail").classList.contains("closed")&&matchMedia("(max-width:1100px)").matches){ closeDetail(); return; }
+    }
+    if(view!=="list"||e.ctrlKey||e.metaKey||e.altKey||$("sendDlg").open||isText(document.activeElement)) return;
+    if(document.activeElement&&document.activeElement.tagName==="SELECT") return;
     const i=shown.findIndex(r=>r.url===selUrl);
     const go=n=>{ if(!n) return; openDetail(n.url,true); setTimeout(()=>$("rows").querySelector(".row.sel")?.scrollIntoView({block:"nearest"}),0); };
+    const actOK=tab==="todo"||tab==="review";     // a and s only where they make sense - never on Applications
     if(e.key==="/"){ e.preventDefault(); $("fText").focus(); }
     else if(e.key==="j"||e.key==="ArrowDown"){ e.preventDefault(); go(shown[Math.min(shown.length-1,i+1)]); }
     else if(e.key==="k"||e.key==="ArrowUp"){ e.preventDefault(); go(shown[Math.max(0,i-1)]); }
-    else if(i>=0&&e.key==="a"){ setStatus(shown[i],"Applied"); }
-    else if(i>=0&&e.key==="s"){ const next=shown[i+1]; setStatus(shown[i],"Skipped"); if(next) setTimeout(()=>go(next),60); }
+    else if(i>=0&&actOK&&e.key==="a"){ setStatusAndMove(shown[i],"Applied"); }
+    else if(i>=0&&actOK&&e.key==="s"){ setStatusAndMove(shown[i],"Skipped"); }
     else if(i>=0&&e.key==="o"){ window.open(safeHref(shown[i].url),"_blank","noopener"); }
   });
 
   // ---------- settings: search
-  let searchDirty=false;
+  let searchDirty=false, meDirty=false, keysDirty=false, boardsDirty=false;
   const dirtySearch=()=>{ searchDirty=true; $("saveSearch").disabled=false; $("searchDirty").textContent="Not saved yet"; };
   function renderSettings(){
     const box=$("countries"); box.innerHTML=""; const cs=profile.search.countries;
     Object.keys(cs).filter(k=>!k.startsWith("_")).forEach(name=>{
       const c=cs[name]; const row=document.createElement("div"); row.className="ctry"+(c.search?"":" off");
-      row.innerHTML=`<span class="nm">${esc(name)}</span><label class="toggle"><input type="checkbox" data-k="search" ${c.search?"checked":""}> Search</label><label class="toggle"><input type="checkbox" data-k="apply" ${c.apply?"checked":""} ${c.search?"":"disabled"}> Apply</label>`;
-      row.querySelectorAll("input").forEach(i=>i.addEventListener("change",()=>{ c[i.dataset.k]=i.checked; if(i.dataset.k==="search"&&!i.checked) c.apply=false; dirtySearch(); renderSettings(); }));
+      row.innerHTML=`<span class="nm" title="${esc(name)}">${esc(SHORT_NAME[name]||name)}</span><label class="toggle"><input type="checkbox" data-k="search" ${c.search?"checked":""}> Search</label><label class="toggle"><input type="checkbox" data-k="apply" ${c.apply?"checked":""} ${c.search?"":"disabled"}> Prepare applications</label>`;
+      row.querySelectorAll("input").forEach(i=>i.addEventListener("change",()=>{ c[i.dataset.k]=i.checked; if(i.dataset.k==="search") c.apply=i.checked; dirtySearch(); renderSettings(); }));
       box.appendChild(row);
+    });
+    const vb=$("visaBox"); vb.innerHTML=""; const wr=profile.work_rights||{};
+    const vc=Object.keys(wr).filter(k=>!k.startsWith("_")&&wr[k]&&typeof wr[k]==="object"&&cs[k]&&cs[k].search);
+    if(vc.length){ const h=document.createElement("p"); h.className="small muted"; h.style.margin="14px 0 2px"; h.textContent="Work visa"; vb.appendChild(h); }
+    vc.forEach(name=>{
+      const l=document.createElement("label"); l.className="toggle"; l.style.margin="4px 6px 0 0";
+      l.innerHTML=`<input type="checkbox" ${wr[name].visa_needed!==false?"checked":""}> ${esc(name)}: To apply only when the ad offers visa sponsorship`;
+      l.querySelector("input").addEventListener("change",e=>{ wr[name].visa_needed=e.target.checked; dirtySearch(); });
+      vb.appendChild(l);
     });
     $("minScore").value=profile.search.min_score??55; $("minScoreOther").value=profile.search.min_score_other??60; $("minScoreOil").value=profile.search.min_score_oilgas??55;
   }
-  [["minScore","min_score",55],["minScoreOther","min_score_other",60],["minScoreOil","min_score_oilgas",55]].forEach(([id,k,d])=>$(id).addEventListener("input",()=>{ profile.search[k]=+$(id).value||d; dirtySearch(); }));
-  $("saveSearch").addEventListener("click",async()=>{ try{ await putFile("profile.json",JSON.stringify(profile,null,2)+"\n"); searchDirty=false; $("saveSearch").disabled=true; $("searchDirty").textContent=""; toast("Search settings saved - they apply from the next search"); }catch(e){ toast("Not saved: "+e.message); } });
-  $("schedBtn").addEventListener("click",async()=>{ const on=!$("schedBtn").dataset.on; try{ const r=await api("/api/schedule",{enable:on,hour:7}); toast(r.scheduled?"Daily search is on at 07:00":(on?(r.message||"Couldn't turn it on"):"Daily search is off")); loadStatus(); }catch(e){ toast("Couldn't change it: "+e.message); } });
-  $("openFolder").addEventListener("click",()=>api("/api/open-folder",{}).catch(()=>{}));
+  [["minScore","min_score"],["minScoreOther","min_score_other"],["minScoreOil","min_score_oilgas"]].forEach(([id,k])=>$(id).addEventListener("input",()=>{ dirtySearch(); }));
+  $("saveSearch").addEventListener("click",async()=>{
+    for(const id of ["minScore","minScoreOther","minScoreOil"]) if(!$(id).reportValidity()) return;
+    profile.search.min_score=+$("minScore").value; profile.search.min_score_other=+$("minScoreOther").value; profile.search.min_score_oilgas=+$("minScoreOil").value;
+    try{ const fresh=JSON.parse(await getFile("profile.json")); fresh.search.countries=profile.search.countries;
+      Object.entries(profile.work_rights||{}).forEach(([k,v])=>{ if(v&&typeof v==="object"&&fresh.work_rights&&fresh.work_rights[k]) fresh.work_rights[k].visa_needed=v.visa_needed!==false; }); fresh.search.min_score=profile.search.min_score; fresh.search.min_score_other=profile.search.min_score_other; fresh.search.min_score_oilgas=profile.search.min_score_oilgas;
+      await putFile("profile.json",JSON.stringify(fresh,null,2)+"\n"); profile=fresh; searchDirty=false; $("saveSearch").disabled=true; $("searchDirty").textContent=""; toast("Search settings saved - they apply from the next search"); }
+    catch(e){ toast("Not saved: "+e.message); } });
+  for(let h=0;h<24;h++){ const o=document.createElement("option"); o.value=String(h); o.textContent=String(h).padStart(2,"0")+":00"; $("schedHour").appendChild(o); }
+  async function setSchedule(on){ try{ const r=await api("/api/schedule",{enable:on,hour:+$("schedHour").value}); toast(r.scheduled?`Daily search is on at ${$("schedHour").selectedOptions[0].textContent}`:(on?(r.message||"Couldn't turn it on"):"Daily search is off")); loadStatus(); }catch(e){ toast("Couldn't change it: "+e.message); } }
+  $("schedBtn").addEventListener("click",()=>setSchedule(!$("schedBtn").dataset.on));
+  $("schedHour").addEventListener("change",()=>{ if($("schedBtn").dataset.on) setSchedule(true); });
+  $("openFolder").addEventListener("click",async()=>{ try{ const r=await api("/api/open-folder",{}); toast(r.ok?"Opening the data folder":"Couldn't open it: "+(r.error||"")); }catch(e){ toast("Couldn't open it: "+e.message); } });
 
-  // ---------- settings: keys (the AI key is managed separately and never touched here)
-  let keysDirty=false;
+  // ---------- settings: your details
+  function renderMe(){ const c=profile.candidate||{}; $("pName").value=c.name||""; $("pPhone").value=c.phone||""; $("pEmail").value=c.email||""; $("pLoc").value=c.location||""; $("pNotice").value=c.notice_period||""; }
+  ["pName","pPhone","pEmail","pLoc","pNotice"].forEach(id=>$(id).addEventListener("input",()=>{ meDirty=true; $("saveMe").disabled=false; }));
+  $("saveMe").addEventListener("click",async()=>{
+    for(const id of ["pName","pPhone","pEmail","pLoc","pNotice"]) if(!$(id).reportValidity()) return;
+    try{ const fresh=JSON.parse(await getFile("profile.json")); const c=fresh.candidate=fresh.candidate||{};
+      const oldName=c.name||"", oldNotice=c.notice_period||"", oldLoc=c.location||"", f=fresh.form_answers||{};
+      c.name=$("pName").value.trim(); c.phone=$("pPhone").value.trim(); c.email=$("pEmail").value.trim(); c.notice_period=$("pNotice").value.trim(); c.location=$("pLoc").value.trim();
+      if(c.location!==oldLoc && (f.address||"")===oldLoc) f.address=c.location;
+      if(c.name!==oldName && [f.first_name,f.last_name].filter(Boolean).join(" ")===oldName){ const parts=c.name.split(/\s+/); f.first_name=parts.shift()||""; f.last_name=parts.join(" "); }
+      if(c.notice_period!==oldNotice && (f.notice_text||"")===oldNotice) f.notice_text=c.notice_period;
+      await putFile("profile.json",JSON.stringify(fresh,null,2)+"\n"); profile=fresh; meDirty=false; $("saveMe").disabled=true; toast("Your details are saved"); }
+    catch(e){ toast("Not saved: "+e.message); } });
+
+  // ---------- settings: Jooble keys (the page never sees a saved key - only whether one is set)
+  const keyEdits={};
   function renderKeys(){
-    const box=$("keysBox"); box.innerHTML=""; keys.jooble=keys.jooble||{};
+    const box=$("keysBox"); box.innerHTML="";
     JOOBLE.forEach(([cc,label])=>{
       const f=document.createElement("div"); f.className="field";
-      f.innerHTML=`<label>Jooble ${esc(label)}</label><input type="text" placeholder="key from ${cc==="us"?"":cc+"."}jooble.org" value="${esc(keys.jooble[cc]||"")}" autocomplete="off" spellcheck="false">`;
-      f.querySelector("input").addEventListener("input",e=>{ keys.jooble[cc]=e.target.value.trim(); keysDirty=true; $("saveKeys").disabled=false; });
+      f.innerHTML=`<label for="jk-${cc}">Jooble ${esc(label)} <span class="faint">${keysSet[cc]?"(saved)":""}</span></label><input type="text" id="jk-${cc}" placeholder="${keysSet[cc]?"saved - paste a new key to replace it":"key from "+(cc==="us"?"":cc+".")+"jooble.org"}" autocomplete="off" spellcheck="false">`;
+      f.querySelector("input").addEventListener("input",e=>{ keyEdits[cc]=e.target.value.trim(); keysDirty=true; $("saveKeys").disabled=false; });
       box.appendChild(f);
     });
   }
-  $("saveKeys").addEventListener("click",async()=>{ try{ const fresh=JSON.parse(await getFile("keys.json")); fresh.jooble=keys.jooble; await putFile("keys.json",JSON.stringify(fresh,null,2)+"\n"); keysDirty=false; $("saveKeys").disabled=true; toast("Keys saved"); }catch(e){ toast("Not saved: "+e.message); } });
+  $("saveKeys").addEventListener("click",async()=>{ const changed=Object.fromEntries(Object.entries(keyEdits).filter(([,v])=>v));
+    try{ const r=await api("/api/keys",{jooble:changed}); if(r.ok===false) throw new Error(r.error); Object.keys(keyEdits).forEach(k=>delete keyEdits[k]); keysDirty=false; $("saveKeys").disabled=true;
+      keysSet=(await api("/api/keys")).jooble||{}; renderKeys(); toast("Keys saved"); }catch(e){ toast("Not saved: "+e.message); } });
 
   // ---------- settings: job boards read through the browser (sources.json -> browser_sites)
   const BOARDS=[["indeed","Indeed"],["bayt","Bayt"],["naukrigulf","NaukriGulf"],["gulftalent","GulfTalent"],["jobbank","Job Bank Canada"]];
@@ -634,15 +826,15 @@ section.settings{overflow:auto;padding:22px 26px 60px}
     BOARDS.forEach(([k,label])=>{
       const l=document.createElement("label"); l.className="toggle";
       l.innerHTML=`<input type="checkbox" ${sites[k]!==false&&boardsCfg.enabled!==false?"checked":""}> ${esc(label)}`;
-      l.querySelector("input").addEventListener("change",e=>{ (boardsCfg.sites=boardsCfg.sites||{})[k]=e.target.checked; $("saveBoards").disabled=false; });
+      l.querySelector("input").addEventListener("change",e=>{ (boardsCfg.sites=boardsCfg.sites||{})[k]=e.target.checked; boardsDirty=true; $("saveBoards").disabled=false; });
       box.appendChild(l);
     });
     $("bShow").checked=!!boardsCfg.show_window;
   }
-  $("bShow").addEventListener("change",e=>{ if(boardsCfg){ boardsCfg.show_window=e.target.checked; $("saveBoards").disabled=false; } });
+  $("bShow").addEventListener("change",e=>{ if(boardsCfg){ boardsCfg.show_window=e.target.checked; boardsDirty=true; $("saveBoards").disabled=false; } });
   $("saveBoards").addEventListener("click",async()=>{ try{ const src=JSON.parse(await getFile("sources.json")); const b=src.browser_sites||{};
       b.sites=boardsCfg.sites; b.show_window=!!boardsCfg.show_window; b.enabled=Object.values(b.sites||{}).some(Boolean); src.browser_sites=b;
-      await putFile("sources.json",JSON.stringify(src,null,2)+"\n"); $("saveBoards").disabled=true; toast("Saved - applies from the next search"); }catch(e){ toast("Not saved: "+e.message); } });
+      await putFile("sources.json",JSON.stringify(src,null,2)+"\n"); boardsDirty=false; $("saveBoards").disabled=true; toast("Saved - applies from the next search"); }catch(e){ toast("Not saved: "+e.message); } });
 
   // ---------- settings: AI
   async function loadAI(){
@@ -655,8 +847,9 @@ section.settings{overflow:auto;padding:22px 26px 60px}
     }catch(_){}
   }
   $("aiProv").addEventListener("change",()=>{ $("aiKeyRow").hidden=$("aiProv").value!=="groq"; $("aiModel").placeholder=$("aiProv").value==="groq"?"meta-llama/llama-4-scout-17b-16e-instruct":"qwen2.5:7b"; });
-  $("aiSave").addEventListener("click",async()=>{ const d={provider:$("aiProv").value,model:$("aiModel").value.trim(),max_per_run:+$("aiMax").value||150,enabled:$("aiOn").checked}; if($("aiKey").value.trim()) d.api_key=$("aiKey").value.trim();
-    try{ const r=await api("/api/ai",d); if(r.ok===false) throw new Error(r.error); $("aiKey").value=""; toast("AI settings saved"); loadAI(); }catch(e){ toast("Not saved: "+e.message); } });
+  $("aiSave").addEventListener("click",async()=>{ if(!$("aiMax").reportValidity()) return;
+    const d={provider:$("aiProv").value,model:$("aiModel").value.trim(),max_per_run:+$("aiMax").value,enabled:$("aiOn").checked}; if($("aiKey").value.trim()) d.api_key=$("aiKey").value.trim();
+    try{ const r=await api("/api/ai",d); if(r.ok===false) throw new Error(r.error); $("aiKey").value=""; toast(r.why_off?"Saved - stays off until you "+r.why_off:"AI settings saved"); loadAI(); }catch(e){ toast("Not saved: "+e.message); } });
   $("aiTest").addEventListener("click",async()=>{ const b=$("aiTest"); b.disabled=true; b.textContent="Testing…"; try{ const r=await api("/api/ai-test",{}); toast(r.message); }catch(e){ toast(e.message); } b.disabled=false; b.textContent="Test connection"; });
 
   // ---------- settings: e-mail
@@ -667,11 +860,13 @@ section.settings{overflow:auto;padding:22px 26px 60px}
     $("mPwState").textContent=mail.has_password?"(saved)":"(not set)"; $("mCvState").textContent=mail.has_cv?"- "+(mail.cv_name||"CV.pdf")+" is saved":"- none yet";
   }
   $("mPreset").addEventListener("change",()=>{ $("mCustom").hidden=!!$("mPreset").value; });
-  $("mSave").addEventListener("click",async()=>{ try{ const d={preset:$("mPreset").value,smtp_host:$("mHost").value.trim(),smtp_port:+$("mPort").value||587,user:$("mUser").value.trim(),from_name:$("mName").value.trim(),cc_self:$("mCc").checked}; if($("mPw").value) d.password=$("mPw").value; await api("/api/mail",d); $("mPw").value=""; toast("E-mail settings saved"); loadMail(); }catch(e){ toast("Not saved: "+e.message); } });
+  $("mSave").addEventListener("click",async()=>{ if(!$("mUser").reportValidity()||!$("mPort").reportValidity()) return;
+    try{ const d={preset:$("mPreset").value,smtp_host:$("mHost").value.trim(),smtp_port:+$("mPort").value||587,user:$("mUser").value.trim(),from_name:$("mName").value.trim(),cc_self:$("mCc").checked}; if($("mPw").value) d.password=$("mPw").value;
+      const r=await api("/api/mail",d); if(r.ok===false) throw new Error(r.error); $("mPw").value=""; toast(r.has_password?"E-mail settings saved":"Saved - enter the app password for this account"); loadMail(); }catch(e){ toast("Not saved: "+e.message); } });
   $("mTest").addEventListener("click",async()=>{ const b=$("mTest"); b.disabled=true; try{ const r=await api("/api/mail-test",{}); toast(r.message); }catch(e){ toast(e.message); } b.disabled=false; });
   $("mCv").addEventListener("change",async()=>{ const f=$("mCv").files[0]; if(!f) return; const buf=new Uint8Array(await f.arrayBuffer()); let bin=""; for(let i=0;i<buf.length;i+=8192) bin+=String.fromCharCode.apply(null,buf.subarray(i,i+8192)); try{ const r=await api("/api/cv",{name:f.name,data:btoa(bin)}); toast(r.ok?"CV saved: "+r.name:(r.error||"Not saved")); loadMail(); }catch(e){ toast("Not saved: "+e.message); } });
 
-  window.addEventListener("beforeunload",e=>{ if(searchDirty||keysDirty){ e.preventDefault(); e.returnValue=""; } });
+  window.addEventListener("beforeunload",e=>{ if(searchDirty||keysDirty||meDirty||boardsDirty){ e.preventDefault(); e.returnValue=""; } });
   try{ const n=JSON.parse(localStorage.getItem("ja-nav")||"{}"); if(n.tab) tab=n.tab; if(n.sec) sec=n.sec; }catch(_){}
   showView();
   loadAll();

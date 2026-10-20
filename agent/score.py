@@ -2,7 +2,8 @@
 from __future__ import annotations
 import re
 from datetime import date
-from .util import countries, country_weight, years_experience
+from functools import lru_cache
+from .util import countries, country_weight, years_experience, VAGUE
 
 YEARS_RANGE = re.compile(r"\b(\d{1,2})\s*(?:-|–|to)\s*(\d{1,2})\s*\+?\s*(?:years|yrs)", re.I)
 YEARS_MIN = re.compile(r"\b(?:minimum|min\.?|at least|more than|over)\s+(?:of\s+)?(\d{1,2})\s*\+?\s*(?:years|yrs)", re.I)
@@ -11,21 +12,25 @@ YEARS_ANY = re.compile(r"\b(\d{1,2})\s*(?:years|yrs)", re.I)
 EXP_WORD = re.compile(r"\bexperience|\bexp\b|\bbackground\b|\bpost[- ]?qualification|\bpost[- ]?graduat", re.I)
 # sentences about the employer, not the candidate: "a contractor with over 25 years of experience in the Kingdom"
 COMPANY_TALK = re.compile(r"\b(we|our|us|company|firm|group|organi[sz]ation|established|founded|history|heritage|track record|"
-                          r"legacy|in business|serving|has (over|more than)|have (over|more than)|since \d{4})\b", re.I)
+                          r"legacy|in business|serving|has (over|more than)|have (over|more than)|since \d{4}|brings|boasts|"
+                          r"operating|in operation|has been|have been|leading|leader|pioneer)\b", re.I)
 
 
-def required_years(text: str) -> tuple[int | None, int | None]:
+def required_years(text: str, company: str = "") -> tuple[int | None, int | None]:
     """(min, max) years of experience the posting asks for. Only sentences about the candidate's experience count:
-    'a company with 25 years of history', 'a 2-year contract' and 'we have 30 years of experience' are ignored."""
-    for sent in re.split(r"[.;\n•●▪]|\s-\s", text):
-        if not EXP_WORD.search(sent) or COMPANY_TALK.search(sent):
+    'a company with 25 years of history', 'a 2-year contract' and 'we have 30 years of experience' are ignored -
+    judged on the words just before the number, so a long paragraph that mentions 'we' elsewhere still counts."""
+    co = re.sub(r"\s+(contracting|company|co|llc|ltd|group|corporation|inc)\b.*$", "", (company or "").lower()).strip()
+    co = co if len(co) >= 3 and co not in ("unknown",) else ""
+    for sent in re.split(r"[.;\n•●▪]|\s[-+]\s", text):
+        if not EXP_WORD.search(sent):
             continue
-        m = YEARS_RANGE.search(sent)
-        if m and int(m.group(1)) <= 15:
-            return int(m.group(1)), int(m.group(2))
-        m = YEARS_MIN.search(sent) or YEARS_PLUS.search(sent) or YEARS_ANY.search(sent)
-        if m and int(m.group(1)) <= 15:
-            return int(m.group(1)), None
+        for rx in (YEARS_RANGE, YEARS_MIN, YEARS_PLUS, YEARS_ANY):
+            for m in rx.finditer(sent):
+                before = sent[max(0, m.start() - 60):m.start()]
+                if int(m.group(1)) > 15 or COMPANY_TALK.search(before) or (co and co in before.lower()):
+                    continue
+                return (int(m.group(1)), int(m.group(2))) if rx is YEARS_RANGE else (int(m.group(1)), None)
     return None, None
 
 
@@ -107,7 +112,24 @@ def find_level(j: dict, profile: dict) -> str:
 
 
 def _word(term: str) -> str:
-    return r"(?<![a-z])" + re.escape(term) + r"(?![a-z])"
+    """A whole word or phrase, plural allowed: 'site engineer' also matches 'Site Engineers'."""
+    return r"(?<![a-z])" + re.escape(term) + r"(?:s|es)?(?![a-z])"
+
+
+@lru_cache(maxsize=20000)
+def _rx(term: str):
+    return re.compile(_word(term))
+
+
+def norm_title(title: str) -> str:
+    """Spelling variants of the same title: 'QAQC', 'QA-QC', 'QA / QC' -> 'qa/qc'."""
+    t = title.lower()
+    t = re.sub(r"\bq\.?\s*a\.?\s*[/&-]?\s*q\.?\s*c\.?(?![a-z])", "qa/qc", t)
+    return re.sub(r"\s+", " ", t)
+
+
+CIVILISH = re.compile(r"\b(civil|water|wastewater|drainage|hydraulic|roads?|highways?|structural|infrastructure|utilit(y|ies)|"
+                      r"pavements?|geotech\w*|sewer\w*|storm ?water|pipelines?|bridges?|earthworks?|municipal)\b")
 
 
 def _all_targets(profile: dict) -> list[str]:
@@ -125,20 +147,29 @@ def _penalties(title: str, profile: dict, matched: list[str]) -> list[tuple[str,
     for term, pen in profile["title_penalties"].items():
         if term.startswith("_") or not isinstance(pen, (int, float)) or any(term in t for t in matched):
             continue
-        if re.search(_word(term), title) and not (term in exempt and re.search(exempt[term], title, re.I)):
+        if _rx(term).search(title) and not (term in exempt and re.search(exempt[term], title, re.I)):
             out.append((term, int(pen)))
     return out
 
 
 def title_only_reject(title: str, profile: dict) -> str | None:
     """Reason a title alone rules a job out (nationals-only, another discipline), or None."""
-    t = title.lower()
+    t = norm_title(title)
     for pat in profile.get("title_reject_patterns", []):
         if re.search(pat, t, re.I):
             return f"title rejects: /{pat}/"
-    matched = [x for x in _all_targets(profile) if re.search(_word(x), t)]
+    matched = [x for x in _all_targets(profile) if _rx(x).search(t)]
     heavy = [(term, p) for term, p in _penalties(t, profile, matched) if p <= -50]
     return f"title:{heavy[0][0]}({heavy[0][1]})" if heavy else None
+
+
+NEGATION = re.compile(r"\b(no|not|unable|cannot|can't|won't|will not|don't|do not|does not|doesn't|isn't|aren't|without|ineligible|"
+                      r"not eligible|neither|nor|excluding)\b", re.I)
+
+
+def _affirmed(text: str, m) -> bool:
+    """A sponsorship phrase that isn't negated by the words around it ('we are unable to offer visa sponsorship')."""
+    return not (NEGATION.search(text[max(0, m.start() - 40):m.start()]) or NEGATION.search(text[m.end():m.end() + 25]))
 
 
 def _days_old(posted: str) -> int | None:
@@ -170,20 +201,25 @@ def score(j: dict, profile: dict) -> tuple[int, str, list[str]]:
     verdict = best[1]
     reasons = list(best[2])
     text = (j["title"] + " " + j.get("description", "")).lower()
-    if verdict == "apply" and j["level"] == "senior":
-        lo, _ = required_years(text)
+    j.pop("_cap", None)                            # the best verdict allowed whatever the AI reviewer later says
+    if j["level"] == "senior":
+        lo, _ = required_years(text, j.get("company", ""))
         if lo is None or lo > years_experience(profile) + 1:
-            verdict = "maybe"                      # senior / lead titles usually want far more years: worth a look, not a send
-            reasons.append("senior title - check the years asked")
+            j["_cap"] = "maybe"
+            if verdict == "apply":
+                verdict = "maybe"                  # senior / lead titles usually want far more years: worth a look, not a send
+                reasons.insert(1, "senior title - check the years asked")     # early, so a shortened note still says it
     wr = (profile.get("work_rights") or {}).get(j.get("country") or "", {})
-    if verdict == "apply" and wr.get("visa_needed"):
+    if wr.get("visa_needed"):
         no = wr.get("no_sponsor") and re.search(wr["no_sponsor"], text, re.I)
-        yes = any(re.search(sig, text, re.I) for sig in wr.get("sponsor_signals", []))
+        yes = any(_affirmed(text, m) for sig in wr.get("sponsor_signals", []) for m in re.finditer(sig, text, re.I))
         if no or not yes:
-            verdict = "maybe"                      # you need a sponsored work visa there: To apply only when they can sponsor
-            reasons.append("needs a work visa - the ad doesn't say they sponsor")
-        else:
-            reasons.append("may sponsor a visa")
+            j["_cap"] = "maybe"
+            if verdict == "apply":
+                verdict = "maybe"                  # you need a sponsored work visa there: To apply only when they can sponsor
+                reasons.insert(1, "needs a work visa - the ad doesn't say they sponsor")
+        elif verdict == "apply":
+            reasons.insert(1, "may sponsor a visa")
     j["salary"] = find_salary(j["title"] + " " + j.get("description", ""))
     j["apply_email"] = find_apply_email(j.get("description", ""))
     if j["sector"]:
@@ -196,7 +232,7 @@ def score(j: dict, profile: dict) -> tuple[int, str, list[str]]:
 
 
 def _score_one(j: dict, profile: dict, cat: str, c: dict) -> tuple[int, str, list[str]]:
-    title = j["title"].lower()
+    title = norm_title(j["title"])
     desc = j.get("description", "")
     text = (j["title"] + " " + desc).lower()
     reasons: list[str] = [f"category:{cat}"]
@@ -208,10 +244,15 @@ def _score_one(j: dict, profile: dict, cat: str, c: dict) -> tuple[int, str, lis
             return 0, "reject", reasons + [f"title rejects: /{pat}/"]
 
     # 1. Title match (the strongest signal)
-    matched = [t for t in c["target_titles"] if re.search(_word(t), title)]
+    matched = [t for t in c["target_titles"] if _rx(t).search(title)]
+    civilish = False
     if matched:
         pts += 40
         reasons.append("target title")
+    elif cat == "civil" and "engineer" in title and CIVILISH.search(title):
+        pts += 30                                  # 'Drainage Engineer', 'Civil Design Engineer', 'Water & Wastewater Engineer'
+        civilish = True
+        reasons.append("civil-type engineer title")
     elif cat == "civil" and "engineer" in title:
         pts += 15
         reasons.append("engineer title")
@@ -223,8 +264,12 @@ def _score_one(j: dict, profile: dict, cat: str, c: dict) -> tuple[int, str, lis
         pts += pen
         reasons.append(f"title:{term}({pen})")
 
-    # 3. Hard rejects anywhere in the text (closed ads, experience far above yours, PhD required, nationals only)
+    # 3. Hard rejects anywhere in the text (closed ads, PhD required, nationals only ...). A newspaper page lists several
+    #    positions: a discipline rule for one of them (e.g. 'degree in electrical engineering') must not reject the page.
+    multi = j.get("source") in profile.get("multi_position_sources", [])
     for pat in profile["hard_reject_patterns"]:
+        if multi and "electrical|mechanical" in pat:
+            continue
         if re.search(pat, text, re.I):
             return 0, "reject", reasons + [f"hard reject: /{pat}/"]
     age = _days_old(j.get("posted", ""))
@@ -243,9 +288,11 @@ def _score_one(j: dict, profile: dict, cat: str, c: dict) -> tuple[int, str, lis
             reasons.append("needs local work rights")
             break
 
-    # 5. Experience fit
+    # 5. Experience fit (only what is asked of the candidate - not the company's own history)
     yrs = years_experience(profile)
-    lo, hi = required_years(text)
+    lo, hi = required_years(text, j.get("company", ""))
+    if lo is not None and lo >= max(7, yrs + 3):
+        return 0, "reject", reasons + [f"asks {lo}+ years"]
     if lo is not None:
         if lo <= yrs and (hi is None or hi >= yrs):
             pts += 15
@@ -269,7 +316,7 @@ def _score_one(j: dict, profile: dict, cat: str, c: dict) -> tuple[int, str, lis
     ctx_text = text + " " + j.get("company", "").lower()
     short = len(desc) < 400
     need = c.get("require_any")
-    if need and not any(re.search(_word(w), ctx_text) for w in need):
+    if need and not any(_rx(w).search(ctx_text) for w in need):
         pts -= 5 if short else 20
         reasons.append("industry unclear" if short else "not construction/utility/industrial")
     gen = profile.get("generic_titles") or {}
@@ -282,11 +329,11 @@ def _score_one(j: dict, profile: dict, cat: str, c: dict) -> tuple[int, str, lis
     kw = 0
     hits = []
     for term, p in c["keyword_points"].items():
-        if re.search(_word(term), text):
+        if _rx(term).search(text):
             kw += p
             hits.append(term)
     pts += min(kw, 40)
-    if len(desc) < 400 and matched and j.get("source") not in profile["search"].get("no_listing_bonus_sources", []):
+    if len(desc) < 400 and (matched or civilish) and j.get("source") not in profile["search"].get("no_listing_bonus_sources", []):
         pts += 15          # only the listing snippet was available: don't punish for keywords it couldn't contain
         reasons.append("listing only")
     if hits:
@@ -299,10 +346,11 @@ def _score_one(j: dict, profile: dict, cat: str, c: dict) -> tuple[int, str, lis
     if w is None:
         if j.get("country") == "Other":
             return 0, "reject", reasons + [f"location outside target countries: {j['location']}"]
-        if j.get("location") and j["location"] not in ("Not specified", "") and not any(
-                re.search(_word(cn.lower()), text) for cn in countries(profile)):
+        loc = j.get("location") or ""
+        vague = not loc or loc == "Not specified" or VAGUE.search(loc) or j.get("target_area")
+        if not vague and not any(_rx(cn.lower()).search(text) for cn in countries(profile)):
             return 0, "reject", reasons + [f"location outside target countries: {j['location']}"]
-        pts -= 10
+        pts -= 5 if j.get("target_area") else 10      # target_area: the site itself only listed jobs in your countries
         reasons.append("country unknown")
     else:
         pts = int(pts * (0.85 + 0.15 * w))

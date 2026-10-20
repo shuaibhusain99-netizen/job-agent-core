@@ -103,5 +103,93 @@ class AppAPI(unittest.TestCase):
         c.close()
 
 
+    def test_only_the_apps_own_script_runs_on_the_page(self):
+        import re
+        st, h, body = self.req("GET", "/", token=False)
+        html = body.decode("utf-8")
+        nonce = re.search(r"'nonce-([^']+)'", h["Content-Security-Policy"]).group(1)
+        self.assertEqual(html.count("<script"), 1)
+        self.assertIn(f'<script nonce="{nonce}">', html)
+        self.assertIn("object-src 'none'", h["Content-Security-Policy"])
+        self.assertIsNone(re.search(r"<[^>]+\son[a-z]+\s*=", html), "inline event handlers would be blocked by the CSP")
+        nonce2 = re.search(r"'nonce-([^']+)'", self.req("GET", "/", token=False)[1]["Content-Security-Policy"]).group(1)
+        self.assertNotEqual(nonce, nonce2)
+
+    def test_keys_are_never_sent_to_the_page(self):
+        self.assertEqual(self.req("GET", "/api/file?path=keys.json")[0], 404)
+        st, _, body = self.req("POST", "/api/keys", {"jooble": {"sa": "abcd-1234-secret"}})
+        self.assertEqual((st, json.loads(body)["ok"]), (200, True))
+        st, _, body = self.req("GET", "/api/keys")
+        self.assertNotIn(b"abcd-1234-secret", body)
+        self.assertIs(json.loads(body)["jooble"]["sa"], True)
+        self.assertIs(json.loads(body)["jooble"]["ae"], False)
+        for bad in ({"jooble": {"zz": "abc"}}, {"jooble": {"sa": "abc def"}}, {"jooble": {"sa": "x" * 101}}):
+            self.assertEqual(self.req("POST", "/api/keys", bad)[0], 400, bad)
+        st, _, body = self.req("POST", "/api/keys", {"ai": {"api_key": "x", "base_url": "http://evil.example"}})
+        self.assertNotIn("evil", (app.DATA / "keys.json").read_text(encoding="utf-8"))
+
+    def test_ai_settings_are_checked_and_the_key_stays_hidden(self):
+        st, _, body = self.req("POST", "/api/ai", {"provider": "groq", "api_key": "gsk_abcdefgh1234", "enabled": True, "max_per_run": 50})
+        self.assertEqual(st, 200)
+        self.assertEqual(json.loads(body)["why_off"], "")
+        st, _, body = self.req("GET", "/api/ai")
+        self.assertNotIn(b"gsk_abcdefgh", body)
+        self.assertTrue(json.loads(body)["settings"]["api_key"].endswith("1234"))
+        for bad in ({"provider": "evil"}, {"model": "a b"}, {"max_per_run": "lots"}, {"api_key": "with space"}):
+            self.assertEqual(self.req("POST", "/api/ai", bad)[0], 400, bad)
+
+    def test_mail_password_only_goes_to_the_server_it_was_saved_for(self):
+        st, _, body = self.req("POST", "/api/mail", {"user": "other@example.com"})
+        self.assertFalse(json.loads(body)["has_password"])
+        self.assertNotIn(b"secret", self.req("GET", "/api/mail")[2])
+        self.assertEqual(self.req("POST", "/api/mail", {"user": "not an address"})[0], 400)
+        self.assertEqual(self.req("POST", "/api/mail", {"smtp_port": 70000})[0], 400)
+        self.assertEqual(self.req("POST", "/api/mail", {"smtp_host": "evil host; rm"})[0], 400)
+
+    def test_status_reports_the_daily_search(self):
+        st, _, body = self.req("GET", "/api/status")
+        s = json.loads(body)
+        self.assertTrue(0 <= s["schedule_hour"] <= 23)
+        self.assertFalse(s["elsewhere"])
+        lock = app.DATA / app.RUN_LOCK
+        lock.write_text("123", encoding="utf-8")
+        try:
+            s = json.loads(self.req("GET", "/api/status")[2])
+            self.assertTrue(s["running"] and s["elsewhere"])
+            self.assertEqual(json.loads(self.req("POST", "/api/run", {})[2])["ok"], False)     # never two searches at once
+        finally:
+            lock.unlink()
+        self.assertEqual(self.req("POST", "/api/schedule", {"enable": False, "hour": 25})[0], 400)
+        self.assertEqual(self.req("POST", "/api/schedule", {"enable": False, "hour": "x"})[0], 400)
+
+    def test_edit_of_a_job_no_longer_listed_says_so(self):
+        st, _, body = self.req("POST", "/api/edits", {"edits": {"https://gone/1": {"status": "Skipped"}}})
+        self.assertFalse(json.loads(body)["ok"])
+
+    def test_the_page_gets_the_list_even_after_excel_resaved_it(self):
+        path = app.DATA / "tracker.csv"
+        before = path.read_bytes()
+        try:
+            path.write_bytes("url;title;status;found_date;score\r\nhttps://job/1;Ingénieur – civil;New;20/10/2026;70\r\n".encode("cp1252"))
+            st, _, body = self.req("GET", "/api/file?path=tracker.csv")
+            self.assertEqual(st, 200)
+            import csv, io
+            rows = list(csv.DictReader(io.StringIO(json.loads(body)["text"])))
+            self.assertEqual((rows[0]["title"], rows[0]["found_date"]), ("Ingénieur – civil", "2026-10-20"))
+            path.write_text("this is not a job list", encoding="utf-8")
+            st, _, body = self.req("GET", "/api/file?path=tracker.csv")
+            self.assertEqual(st, 500)
+            self.assertIn("can't be read", json.loads(body)["error"])
+        finally:
+            path.write_bytes(before)
+
+    def test_page_only_reads_and_writes_its_own_files(self):
+        for name in ("tracker.csv", "profile.json", "sources.json"):
+            self.assertEqual(self.req("GET", "/api/file?path=" + name)[0], 200, name)
+        for name in ("keys.json", "mail.json", "cooldown.json", "state.json", "seen.json", "Profile.json"):
+            self.assertEqual(self.req("GET", "/api/file?path=" + name)[0], 404, name)
+        for name in ("keys.json", "runs.log", "tracker.csv", "mail.json"):
+            self.assertEqual(self.req("POST", "/api/file?path=" + name, {"text": "{}"})[0], 400, name)
+
 if __name__ == "__main__":
     unittest.main()

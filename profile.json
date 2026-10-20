@@ -271,7 +271,26 @@
     "substation": -40,
     "protection engineer": -50,
     "rf engineer": -80,
-    "network planning": -60
+    "network planning": -60,
+    "managing": -25,
+    "deputy": -15,
+    "sr": -15,
+    "data pipeline": -80,
+    "azure": -80,
+    "vmware": -80,
+    "aws": -80,
+    "gcp": -80,
+    "kubernetes": -80,
+    "cyber": -80,
+    "cybersecurity": -80,
+    "security engineer": -60,
+    "network infrastructure": -60,
+    "servicenow": -80,
+    "salesforce": -80,
+    "oracle dba": -80,
+    "it support": -70,
+    "helpdesk": -80,
+    "help desk": -80
   },
   "keyword_points": {
     "water network": 12,
@@ -355,9 +374,6 @@
     "local council": 3
   },
   "hard_reject_patterns": [
-    "(?<![\\d\\s][-–])(?<![-–])(?<!\\bto\\s)\\b(?:[7-9]|1[0-5])\\s*(?:-|–|to)\\s*\\d{1,2}\\s*\\+?\\s*(?:years|yrs)",
-    "\\b(?:minimum|min\\.?|at least)\\s+(?:of\\s+)?(?:[7-9]|1[0-5])\\s*\\+?\\s*(?:years|yrs)",
-    "(?<![-–\\d])(?<!\\bto\\s)\\b(?:[7-9]|1[0-5])\\s*\\+\\s*(?:years|yrs)(?=[^.;\\n]{0,60}\\bexperience)",
     "\\bph\\.?\\s?d\\.?\\b[^.;\\n]{0,30}\\b(?:is\\s+)?(?:required|mandatory|essential|must)\\b|\\b(?:required|must (?:have|hold))\\b[^.;\\n]{0,30}\\bph\\.?\\s?d\\b",
     "\\bmaster'?s?\\s+degree\\s+(?:is\\s+)?(?:required|mandatory)",
     "\\b(?:saudi|uae|emirati|qatari|kuwaiti|omani)\\s+(?:nationals?|citizens?)\\s+only\\b",
@@ -365,7 +381,12 @@
     "\\bfor\\s+(?:saudis|emiratis|qataris|kuwaitis|omanis)\\s+only\\b",
     "\\b(?:bachelor|degree)\\s+in\\s+(?:electrical|mechanical|chemical|computer|petroleum)\\s+engineering\\b(?![^.;\\n]{0,40}\\bcivil\\b)",
     "\\b(?:this|the)\\s+(?:vacancy|position|job|role|posting)\\s+(?:is|has)\\s+(?:now\\s+)?(?:been\\s+)?(?:closed|filled|expired)\\b",
-    "\\bno longer accepting applications\\b|\\bapplications? (?:are|is|have) (?:now )?closed\\b"
+    "\\bno longer accepting applications\\b|\\bapplications? (?:are|is|have) (?:now )?closed\\b",
+    "\\b(?:must be|open to|only for|for|exclusively for|restricted to|limited to)\\s+(?:an?\\s+)?(?:saudi|uae|emirati|qatari|kuwaiti|omani)\\s+(?:nationals?|citizens?|candidates?)\\b(?![^.;\\n]{0,25}\\b(?:or|and|/)\\s*(?:other\\s+)?gcc)",
+    "\\b(?:emiratis|saudis|qataris|kuwaitis|omanis)\\s+only\\b",
+    "\\b(?:this|the)\\s+(?:is\\s+an?\\s+)?(?:role|position|job|vacancy|opportunity)?\\s*(?:is\\s+)?(?:an?\\s+)?(?:emiratisation|emiratization|saudi[sz]ation|omani[sz]ation|qatari[sz]ation|kuwaiti[sz]ation)\\b|\\b(?:emiratisation|emiratization|saudi[sz]ation|omani[sz]ation|qatari[sz]ation|kuwaiti[sz]ation)\\s+(?:role|position|job|vacancy|opportunity|program(?:me)?)\\b",
+    "\\blooking for (?:an?\\s+)?(?:emirati|saudi|qatari|kuwaiti|omani)\\s+(?:national\\s+)?(?:graduate|engineer|candidate|professional|talent)",
+    "\\b(?:female|women|ladies)\\s+(?:candidates?\\s+|applicants?\\s+)?only\\b|\\bonly\\s+(?:female|women|ladies)\\b"
   ],
   "experience_fit": {
     "_comment": "Experience ranges that match 4 years earn a bonus; others are penalised in score.py",
@@ -513,11 +534,12 @@
     "_comment": "Pattern (regex, case-insensitive) -> factual answer. Used to pre-draft answers to common application questions.",
     "\\bdriv(ing|er'?s?)\\s*licen[cs]e": "Valid Bahrain driving licence.",
     "degree|bachelor|qualification": "Yes - B.Sc. Civil Engineering, University of Bahrain (2017-2021), GPA 3.17/4.0.",
-    "years? of experience|how many years|experience level": "4 years of civil engineering experience (Nov 2021 - present): water-network maintenance, roads and infrastructure, and airfield works in Bahrain.",
-    "notice|availability|start date|join": "30 days' notice; can join within 30 days of offer.",
-    "relocat|willing to work|based in|onsite|on-site|shift": "Yes - willing to relocate and to work on site and on shifts.",
+    "years? of experience|how many years|experience level": "{years} years of civil engineering experience (Nov 2021 - present): water-network maintenance, roads and infrastructure, and airfield works in Bahrain.",
+    "notice period|how soon|when (can|could) you (start|join)|availab(le|ility) to (start|join)|start(ing)? date|joining date|\\bjoin(ing)? (date|within|immediately)": "{notice} notice period; I can join within {notice} of an offer.",
+    "\\b(currently )?(based|living|located|residing) in\\b|\\bwhere (are you|do you)( currently)? (based|live|located|reside)|\\bcurrent (location|city|country of residence)\\b": "I am based in {location} and ready to relocate.",
+    "relocat|willing to work|onsite|on-site|\\bshifts?\\b|rotation": "Yes - willing to relocate and to work on site and on shifts.",
     "\\bsaudi council\\b|\\bsce\\b|\\bengineering (licen[cs]e|registration)\\b|\\bprofessional (licen[cs]e|registration)\\b": "Eligible for Saudi Council of Engineers registration; registration can be completed on appointment.",
-    "salary|expected|compensation": "Open to discussion in line with the role and market; happy to share expectations at interview.",
+    "\\bsalary\\b|expected (salary|pay|compensation|package|ctc)|\\bcompensation\\b|\\bremuneration\\b|\\bctc\\b": "Open to discussion in line with the role and market; happy to share expectations at interview.",
     "nebosh|iosh|safety cert|hse": "Yes - NEBOSH IGC, IOSH Working Safely, Highfield Fire Safety L2 and Risk Assessment L2, MEDIC First Aid.",
     "autocad|civil 3d|software": "AutoCAD and Civil 3D (project and course experience), STAAD Pro (training), MS Project, Excel, Power Apps.",
     "\\bwater\\b|\\bwastewater\\b|\\bpipelines?\\b|\\bnwc\\b|\\bnational water company\\b": "2 years on the Electricity & Water Authority (Bahrain) water distribution emergency repair contract: leak repairs, pipe replacement, reinstatement and the monthly BOQ claims. I have not worked on NWC projects; I used EWA's equivalent work-order and BOQ system.",
@@ -992,7 +1014,11 @@
     "^(?!.*\\b(?:gcc|bahraini?)\\b).*\\((?:uae|saudi|qatari|kuwaiti|omani)\\s+(?:only|nationals?)\\)",
     "^(?!.*\\b(?:gcc|bahraini?)\\b).*\\bsaudi\\s+only\\b",
     "^(?!.*\\b(?:gcc|bahraini?)\\b).*\\bnationals?\\s+only\\b",
-    "\\bemiratisation\\b|\\bsaudi[sz]ation\\b"
+    "\\bemiratisation\\b|\\bsaudi[sz]ation\\b",
+    "^(?!.*\\b(?:gcc|bahraini?)\\b).*\\b(?:saudi|kuwaiti|qatari|emirati|omani)\\s+(?:civil|site|project|graduate|junior|fresh|trainee|engineer|inspector|surveyor|officer|technician|supervisor|coordinator|national)",
+    "^(?!.*\\b(?:gcc|bahraini?)\\b).*\\(\\s*nationals?\\s*\\)",
+    "\\b(?:omani[sz]ation|qatari[sz]ation|kuwaiti[sz]ation|emirati[sz]ation)\\b",
+    "\\b(?:female|ladies|women)\\b"
   ],
   "title_penalty_exempt": {
     "_comment": "A penalty word is ignored when the title also matches this (e.g. 'Wet Utilities Network Engineer' is not IT).",
@@ -1004,8 +1030,24 @@
     "saudis only": "\\bgcc\\b|\\bbahraini?\\b",
     "emirati": "\\bgcc\\b|\\bbahraini?\\b",
     "qatari national": "\\bgcc\\b|\\bbahraini?\\b",
-    "automation": "\\bbuilding information|\\bbim\\b",
-    "commissioning": "\\bcivil\\b|\\bwater\\b|\\bpipeline\\b"
+    "automation": "\\bbuilding information|\\bbim\\b|\\bcivil\\b|\\bstructural\\b|\\bsite\\b",
+    "commissioning": "\\bcivil\\b|\\bwater\\b|\\bpipeline\\b|\\bcivil\\b|\\bstructural\\b|\\bsite\\b",
+    "substation": "\\bcivil\\b|\\bstructural\\b|\\bsite\\b",
+    "telecom": "\\bcivil\\b|\\bstructural\\b|\\bsite\\b",
+    "telecommunications": "\\bcivil\\b|\\bstructural\\b|\\bsite\\b",
+    "fiber": "\\bcivil\\b|\\bstructural\\b|\\bsite\\b",
+    "fibre": "\\bcivil\\b|\\bstructural\\b|\\bsite\\b",
+    "signalling": "\\bcivil\\b|\\bstructural\\b|\\bsite\\b",
+    "signaling": "\\bcivil\\b|\\bstructural\\b|\\bsite\\b",
+    "automated": "\\bcivil\\b|\\bstructural\\b|\\bsite\\b",
+    "elv": "\\bcivil\\b|\\bstructural\\b|\\bsite\\b",
+    "bms": "\\bcivil\\b|\\bstructural\\b|\\bsite\\b",
+    "marine": "\\bcivil\\b|\\bstructural\\b|\\bsite\\b",
+    "rail": "\\bcivil\\b|\\bstructural\\b|\\bsite\\b",
+    "tunnel": "\\bcivil\\b|\\bstructural\\b|\\bsite\\b",
+    "offshore": "\\bcivil\\b|\\bstructural\\b|\\bsite\\b",
+    "piping": "\\bcivil\\b|\\bstructural\\b",
+    "geotechnical": "\\bcivil\\b|\\bstructural\\b|\\bsite\\b"
   },
   "work_rights": {
     "_comment": "Outside the GCC: 'reject' = you can't legally take the job without citizenship/PR/clearance; 'penalty' = boilerplate that usually means no sponsorship; visa_needed = the job goes to Review unless the ad shows the employer sponsors visas (sponsor_signals) - set it to false if you get a work permit or PR there.",
@@ -1023,20 +1065,17 @@
       ],
       "visa_needed": true,
       "sponsor_signals": [
-        "\\bvisa sponsorship\\b(?![^.;\\n]{0,20}\\b(?:is )?not\\b)",
-        "\\b(?:can|will|able to|happy to|willing to)\\s+sponsor\\b",
-        "\\bsponsorship (?:is |may be )?(?:available|provided|offered|considered)\\b",
-        "\\b(?:482|186|494|tss|dama|skilled)\\s+visa\\b",
+        "\\bvisa sponsorship\\b",
+        "\\b(?:can|will|able to|happy to|willing to|we)\\s+sponsor\\b",
+        "\\bsponsorship (?:is |may be |can be )?(?:available|provided|offered|considered)\\b",
+        "\\b(?:482|186|494|tss|dama)\\s+visa\\b",
         "\\blmia\\b",
         "\\btemporary foreign workers?\\b",
-        "\\b(?:international|overseas|foreign) (?:candidates|applicants|workers)\\b(?![^.;\\n]{0,30}\\b(?:not|cannot|won't)\\b)",
-        "\\brelocation (?:support|assistance|package|allowance)\\b",
-        "\\bwork permit (?:support|assistance|sponsorship)\\b",
-        "\\bglobal talent\\b",
-        "\\bemployer[- ]sponsored\\b",
-        "\\bwe sponsor\\b"
+        "\\b(?:international|overseas) applicants (?:are )?(?:welcome|encouraged)\\b",
+        "\\bwork permit (?:sponsorship|support)\\b",
+        "\\bglobal talent (?:visa|stream|program)\\b"
       ],
-      "no_sponsor": "\\bno (?:visa )?sponsorship\\b|\\b(?:unable|not able|cannot|can't|won't|will not|not offering)\\s+(?:to\\s+)?(?:provide\\s+)?sponsor|\\bsponsorship (?:is )?not (?:available|provided|offered)\\b|\\bwithout (?:the need for )?(?:visa )?sponsorship\\b"
+      "no_sponsor": "\\bno (?:visa )?sponsorship\\b|\\b(?:unable|not able|cannot|can't|won't|will not|do not|don't|does not|doesn't|are not|is not|not)\\s+(?:\\w+\\s+){0,3}(?:sponsor|sponsorship)|\\bsponsorship (?:is |will |can )?(?:not|n't)\\b|\\bnot eligible for (?:\\w+\\s+){0,2}sponsorship\\b|\\bwithout (?:the need for )?(?:visa )?sponsorship\\b|\\bemployment authori[sz]ation is not\\b|\\bmust (?:have|hold|possess) (?:a )?(?:valid )?(?:work (?:visa|rights|permit)|working rights|right to work)\\b"
     },
     "Canada": {
       "reject": [
@@ -1050,30 +1089,27 @@
       ],
       "visa_needed": true,
       "sponsor_signals": [
-        "\\bvisa sponsorship\\b(?![^.;\\n]{0,20}\\b(?:is )?not\\b)",
-        "\\b(?:can|will|able to|happy to|willing to)\\s+sponsor\\b",
-        "\\bsponsorship (?:is |may be )?(?:available|provided|offered|considered)\\b",
-        "\\b(?:482|186|494|tss|dama|skilled)\\s+visa\\b",
+        "\\bvisa sponsorship\\b",
+        "\\b(?:can|will|able to|happy to|willing to|we)\\s+sponsor\\b",
+        "\\bsponsorship (?:is |may be |can be )?(?:available|provided|offered|considered)\\b",
+        "\\b(?:482|186|494|tss|dama)\\s+visa\\b",
         "\\blmia\\b",
         "\\btemporary foreign workers?\\b",
-        "\\b(?:international|overseas|foreign) (?:candidates|applicants|workers)\\b(?![^.;\\n]{0,30}\\b(?:not|cannot|won't)\\b)",
-        "\\brelocation (?:support|assistance|package|allowance)\\b",
-        "\\bwork permit (?:support|assistance|sponsorship)\\b",
-        "\\bglobal talent\\b",
-        "\\bemployer[- ]sponsored\\b",
-        "\\bwe sponsor\\b"
+        "\\b(?:international|overseas) applicants (?:are )?(?:welcome|encouraged)\\b",
+        "\\bwork permit (?:sponsorship|support)\\b",
+        "\\bglobal talent (?:visa|stream|program)\\b"
       ],
-      "no_sponsor": "\\bno (?:visa )?sponsorship\\b|\\b(?:unable|not able|cannot|can't|won't|will not|not offering)\\s+(?:to\\s+)?(?:provide\\s+)?sponsor|\\bsponsorship (?:is )?not (?:available|provided|offered)\\b|\\bwithout (?:the need for )?(?:visa )?sponsorship\\b"
+      "no_sponsor": "\\bno (?:visa )?sponsorship\\b|\\b(?:unable|not able|cannot|can't|won't|will not|do not|don't|does not|doesn't|are not|is not|not)\\s+(?:\\w+\\s+){0,3}(?:sponsor|sponsorship)|\\bsponsorship (?:is |will |can )?(?:not|n't)\\b|\\bnot eligible for (?:\\w+\\s+){0,2}sponsorship\\b|\\bwithout (?:the need for )?(?:visa )?sponsorship\\b|\\bemployment authori[sz]ation is not\\b|\\bmust (?:have|hold|possess) (?:a )?(?:valid )?(?:work (?:visa|rights|permit)|working rights|right to work)\\b"
     }
   },
-  "_rules_version": 7,
+  "_rules_version": 10,
   "_rules_comment": "Rule lists (rejects, penalties, sectors, work rights, screening answers, category rules) are maintained by the program and refreshed when it updates. Your facts, countries, queries and minimum scores are yours.",
   "ai_facts": {
     "work_status": "GCC national (Bahraini): does not need visa sponsorship to work in other GCC countries; would need employer visa sponsorship for Canada or Australia and does not hold their citizenship or permanent residence."
   },
   "levels": {
     "_comment": "Shown as a tag and filter on every job.",
-    "senior": "\\b(senior|sr\\.?|lead|principal|manager|head|director|chief|superintendent)\\b",
+    "senior": "\\b(senior|sr\\.?|lead|principal|manager|managing|head|director|chief|superintendent|deputy)\\b",
     "starter": "\\b(fresh(er)?|graduate|trainee|junior|jr\\.?|intern(ship)?|entry[- ]level|apprentice|0\\s*(-|to)\\s*[12]\\s*(years|yrs))\\b",
     "support": "\\b(technician|inspector|supervisor|foreman|draftsman|draughtsman|operator|assistant|coordinator)\\b"
   },
@@ -1097,6 +1133,9 @@
       "cost engineer",
       "estimator"
     ],
-    "context": "\\b(civil|construction|constructions|contracting|contractors?|infrastructure|roads?|highways?|bridges?|utilit(y|ies)|water|wastewater|sewer(age)?|drainage|stormwater|storm water|pipelines?|earthworks?|concrete|structural|buildings?|fit-?out|asphalt|pavements?|airport|airfield|metro|rail|railways?|developments|villas?|towers?|fa[cç]ades?|finishing|mep|tunnel(l)?ing|marine works|ports?|municipal(ity)?|land development|subdivision|geotechnical|surveying|epc|qa/?qc|formwork|excavation|reinforcement|real estate|developer|property|precast|ready-?mix|quarry|dredging|landscape|irrigation|district cooling|substructure|superstructure)\\b"
-  }
+    "context": "\\b(civil|construction|constructions|contracting|contractors?|infrastructure|roads?|highways?|bridges?|utilit(y|ies)|water|wastewater|sewer(age)?|drainage|stormwater|storm water|pipelines?|earthworks?|concrete|structural|buildings?|fit-?out|asphalt|pavements?|airport|airfield|metro|rail|railways?|developments|villas?|towers?|fa[cç]ades?|finishing|mep|tunnel(l)?ing|marine works|ports?|municipal(ity)?|land development|subdivision|geotechnical|surveying|epc|qa/?qc|formwork|excavation|reinforcement|real estate|developer|property|precast|piling|foundations?|geotech|ready-?mix|quarry|dredging|landscape|irrigation|district cooling|substructure|superstructure)\\b"
+  },
+  "multi_position_sources": [
+    "Gulf Job Paper"
+  ]
 }

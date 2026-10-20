@@ -1,8 +1,9 @@
 /* JobAgent form filler - runs in an ISOLATED WORLD of the job page (set up by agent/browser.py).
    The page shares the DOM but cannot see these variables or patch these built-ins.
-   Rules: auto-fill only on the job's own site / known job boards (elsewhere only after you click "Fill this page");
-   only fields that are really on screen; the CV only after you click "Attach CV"; never ticks consent or legal
-   declarations; never clicks Submit/Next. The app reads __ja.state() to know what happened. */
+   Rules: auto-fill only on known job boards / ATS sites (elsewhere only after you click "Fill this page", and then only
+   fields you can actually see, not covered by anything); the CV only after you click "Attach CV"; never ticks consent
+   or legal declarations; never clicks Submit/Next/any button - only radio buttons and checkboxes of a Yes/No question;
+   a job counts as Applied only when YOU press "I submitted". The app reads __ja.state() to know what happened. */
 (() => {
   if (window.__ja) return;
   const CTX = __JOBAGENT_CONTEXT__;
@@ -11,7 +12,8 @@
   if (window !== window.top) return;            // forms inside other sites' frames are left alone
   const P = CTX.profile, C = P.candidate, F = P.form_answers || {}, JOB = CTX.job || {};
   const GCC = ["Saudi Arabia", "United Arab Emirates", "Qatar", "Kuwait", "Oman", "Bahrain"];
-  const inGCC = GCC.includes(JOB.country || "") || !JOB.country;
+  const inGCC = JOB.country ? GCC.includes(JOB.country) : null;     // unknown country: work-permit questions stay yours
+  const WORK = (gcc, other) => inGCC === null ? null : (inGCC ? gcc : other);
   const nameParts = (C.name || "").trim().split(/\s+/);
   const first = F.first_name || nameParts[0] || "", last = F.last_name || nameParts.slice(1).join(" ") || "";
   const [city, country] = (C.location || "Sitra, Bahrain").split(",").map(s => s.trim());
@@ -58,9 +60,9 @@
   ];
   // ---- yes/no questions (radios, selects, checkboxes with Yes/No options)
   const YESNO = [
-    [/\b(authori[sz]ed|legally|eligible|permitted|right)\b.*\bwork\b|\bwork\s*(permit|authori[sz]ation)\b/i, inGCC ? "Yes" : "No"],
-    [/\bsponsor/i, inGCC ? "No" : "Yes"],
-    [/\bvisa\b/i, inGCC ? "No" : "Yes"],
+    [/\b(authori[sz]ed|legally|eligible|permitted|right)\b.*\bwork\b|\bwork\s*(permit|authori[sz]ation)\b/i, WORK("Yes", "No")],
+    [/\bsponsor/i, WORK("No", "Yes")],
+    [/\bvisa\b/i, WORK("No", "Yes")],
     [/\brelocat|\bwilling to (move|travel|work)|\bonsite|\bon-site|\bshift|\brotation|\bovertime/i, "Yes"],
     [/\b(18|eighteen)\b|\blegal age\b|\badult\b/i, "Yes"],
     [/\bdriv(ing|er'?s?)\s*licen[cs]e\b/i, "Yes"],
@@ -70,7 +72,7 @@
     [/\bcivil engineer(ing)?\b.*\b(experience|background)\b/i, "Yes"],
     [/\bsaudi council|\bsce\b/i, F.sce_registered || "No"],
     [/\bp\.?\s*eng\b|\bprofessional engineer\b|\bchartered\b|\brpeq\b|\bcpeng\b/i, "No"],
-    [/\bbased in\b|\bcurrently (reside|living|located)\b|\blocal candidate\b/i, inGCC && /bahrain/i.test(JOB.location || "") ? "Yes" : "No"],
+    [/\bbased in\b|\bcurrently (reside|living|located)\b|\blocal candidate\b/i, inGCC === null ? null : (inGCC && /bahrain/i.test(JOB.location || "") ? "Yes" : "No")],
   ];
   // Questions only YOU can answer (legal declarations, consent, history, diversity) are never filled.
   const PERSONAL = /\bconvict|\bcriminal|\bfelony|\boffen[cs]e|\bdisabilit|\bveteran|\bgender|\bsex\b|\bethnic|\brace\b|\breligio|\bmarital|\bpregnan|\bdate of birth|\bdob\b|\bage\b|\brelative|\bfamily member|\bconflict of interest|\bgovernment official|\bpreviously (worked|applied|employed)|\bformer employee|\bnon-?compete|\bemployment agreement|\brestrictive|\bagree\b|\bconsent|\backnowledge|\bcertify|\bdeclar|\bprivacy|\bterms\b|\bsignature|\bsign here|\bpassword|\bpassport|\bnational id|\bcpr\b|\biqama|\bssn\b|\bsocial security|\bbank|\biban|\bcard number/i;
@@ -97,7 +99,18 @@
       if (n.getAttribute("aria-hidden") === "true" || n.hasAttribute("inert")) return false;
       if (/inset\(\s*(50|100)%/.test(s.clipPath) || /rect\(\s*0(px)?,?\s*0(px)?,?\s*0(px)?,?\s*0(px)?\s*\)/.test(s.clip)) return false;
     }
-    return true;
+    return AUTO || uncovered(el, r);
+  }
+  // Outside known job sites a field must be in view and not covered by another element (a page could hide a field
+  // under a picture to collect your details without you seeing them). Fields further down fill as you scroll to them.
+  function uncovered(el, r) {
+    const x = r.left + Math.min(r.width / 2, 20), y = r.top + Math.min(r.height / 2, 10);
+    if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) return false;
+    const hit = document.elementFromPoint(x, y);
+    if (!hit) return false;
+    if (hit === el || el.contains(hit) || hit.contains(el)) return true;
+    const lab = hit.closest("label");
+    return !!(lab && (lab.contains(el) || (el.id && lab.htmlFor === el.id)));
   }
   const txt = (n) => (n ? (n.innerText || n.textContent || "") : "").replace(/\s+/g, " ").trim();
   function describe(el) {
@@ -159,8 +172,14 @@
     for (const [rx, v] of RULES) if (rx.test(d)) return typeof v === "function" ? v(d, el) : v;
     return null;
   }
-  function yesNoFor(d) { for (const [rx, v] of YESNO) if (rx.test(d)) return v; return null; }
+  function yesNoFor(d) { for (const [rx, v] of YESNO) if (rx.test(d)) return v; return null; }   // null = leave it to you
 
+  // the only element the filler ever clicks: one option of a Yes/No (or similar) question - never a button or link
+  function tick(g) {
+    if (!(g instanceof HTMLInputElement) || (g.type !== "radio" && g.type !== "checkbox") || g.disabled) return false;
+    g.click();
+    return true;
+  }
   function fillOnce() {
     let filled = 0;
     const seenGroups = new Set();
@@ -174,7 +193,7 @@
       const type = (el.getAttribute("type") || "text").toLowerCase();
       if (["hidden", "submit", "button", "file", "password", "search", "image", "reset"].includes(type)) continue;
       let d = describe(el);
-      if (type === "radio" || (type === "checkbox" && el.name && document.querySelectorAll(`input[name="${CSS.escape(el.name)}"]`).length > 1)) {
+      if (type === "radio" || (type === "checkbox" && el.name && document.querySelectorAll(`input[type="checkbox"][name="${CSS.escape(el.name)}"]`).length > 1)) {
         const fs = el.closest("fieldset,[role=group],[role=radiogroup]");
         const lg = fs ? (fs.querySelector("legend") || (fs.getAttribute("aria-labelledby") ? document.getElementById(fs.getAttribute("aria-labelledby")) : null)) : null;
         if (lg) d = txt(lg) + " | " + d; else if (fs && fs.getAttribute("aria-label")) d = fs.getAttribute("aria-label") + " | " + d;
@@ -183,7 +202,8 @@
       if (!d || PERSONAL.test(d)) { DONE.add(el); continue; }
       if (type === "radio" || type === "checkbox") {
         const key = el.name || d; if (seenGroups.has(key)) continue;
-        const group = el.name ? [...document.querySelectorAll(`input[name="${CSS.escape(el.name)}"]`)] : [el];
+        const group = (el.name ? [...document.querySelectorAll(`input[type="${type}"][name="${CSS.escape(el.name)}"]`)] : [el])
+          .filter(g => g.type === "radio" || g.type === "checkbox");
         if (group.some(g => g.checked)) { seenGroups.add(key); continue; }
         const labels = group.map(g => ({ g, t: (txt(g.closest("label")) || txt(document.querySelector(`label[for="${CSS.escape(g.id || "")}"]`)) || "").toLowerCase() }));
         const q = d + " " + labels.map(l => l.t).join(" ");
@@ -196,10 +216,10 @@
           if (!pick) { // non yes/no groups: country / degree etc.
             const v = valueFor(el, d); if (v) pick = labels.find(l => l.t.includes(String(v).toLowerCase()));
           }
-          if (pick) { pick.g.click(); group.forEach(g => DONE.add(g)); filled++; }
+          if (pick && tick(pick.g)) { group.forEach(g => DONE.add(g)); filled++; }
         } else {
           const v = valueFor(el, d); const pick = v ? labels.find(l => l.t.includes(String(v).toLowerCase())) : null;
-          if (pick) { pick.g.click(); group.forEach(g => DONE.add(g)); filled++; }
+          if (pick && tick(pick.g)) { group.forEach(g => DONE.add(g)); filled++; }
         }
         seenGroups.add(key); continue;
       }
@@ -224,13 +244,17 @@
   }
   const SUBMITTED = /application (was )?(sent|submitted|received)|thank you for (applying|your application)|successfully (applied|submitted)|you('ve| have) applied|application complete/i;
   const ST = { total: 0, filledNow: 0, submitted: false, cvRequested: false, cvCount: 0, armed: AUTO };
-  let bar, msg;
-  // The bar lives in a closed shadow root: the page can't restyle it, read it or find its buttons.
+  let bar, msg, barSeen = false;
+  const BAR_CSS = "all:initial;position:fixed;right:16px;bottom:16px;z-index:2147483647";
+  const BAR_NORM = (() => { const d = document.createElement("div"); d.style.cssText = BAR_CSS; return d.style.cssText; })();   // as Chrome writes it back
+  // The bar lives in a closed shadow root: the page can't read it or find its buttons. The page CAN restyle or cover the
+  // host element, so a click counts only while Chrome reports the bar fully visible and unobscured (IntersectionObserver
+  // v2 trackVisibility - the browser's own clickjacking check) and the click really landed on it.
   function bar_() {
     if (bar && document.documentElement.contains(bar)) return;
     bar = document.createElement("div");
     const root = bar.attachShadow({ mode: "closed" });
-    bar.style.cssText = "all:initial;position:fixed;right:16px;bottom:16px;z-index:2147483647";
+    bar.style.cssText = BAR_CSS;
     root.innerHTML = `<style>
       .b{background:#111827;color:#fff;font:13px/1.4 system-ui,sans-serif;padding:10px 12px;border-radius:10px;box-shadow:0 8px 30px rgba(0,0,0,.35);display:flex;gap:8px;align-items:center;max-width:560px;flex-wrap:wrap}
       button{font:inherit;border:0;border-radius:6px;padding:5px 9px;color:#fff;cursor:pointer}
@@ -240,12 +264,21 @@
     msg = root.getElementById("m");
     const fillBtn = root.getElementById("fill");
     fillBtn.textContent = ST.armed ? "Fill again" : "Fill this page";
-    const trusted = (fn) => (e) => { if (e.isTrusted) fn(); };            // only real clicks by the person count
+    const trusted = (fn) => (e) => {                                        // only real clicks by the person, on a bar they can see
+      const s = getComputedStyle(bar);
+      const ok = e.isTrusted && barSeen && document.elementFromPoint(e.clientX, e.clientY) === bar && s.opacity === "1"
+        && s.visibility === "visible" && s.display !== "none" && bar.style.cssText === BAR_NORM;
+      if (ok) fn(); else { bar.style.cssText = BAR_CSS; barSeen = false; say("click ignored - the page was covering this bar; try again"); }
+    };
     fillBtn.addEventListener("click", trusted(() => { ST.armed = true; fillBtn.textContent = "Fill again"; run(); }));
     root.getElementById("cv").addEventListener("click", trusted(() => { ST.cvRequested = true; say("attaching CV…"); }));
     root.getElementById("done").addEventListener("click", trusted(() => { ST.submitted = true; say("marked as Applied in the app ✓"); }));
     root.getElementById("x").addEventListener("click", trusted(() => bar.remove()));
     document.documentElement.appendChild(bar);
+    try {
+      const io = new IntersectionObserver(es => { for (const e of es) barSeen = e.isVisible === true; }, { trackVisibility: true, delay: 100 });
+      io.observe(bar);
+    } catch (e) { barSeen = false; }      // no visibility tracking: the bar can't be trusted, so its buttons do nothing
     say(ST.armed ? "ready" : `${HOST} isn't a known job site - check it, then press "Fill this page"`);
   }
   function say(m) { bar_(); msg.textContent = m; }
@@ -256,8 +289,8 @@
       if (ST.total) say(`filled ${ST.total} field${ST.total > 1 ? "s" : ""} - check them, attach your CV, then press the site's button`);
       else say("no fields yet - open the apply form");
     }
-    if (!ST.submitted && SUBMITTED.test((document.body.innerText || "").slice(0, 20000)) && ST.total) {
-      ST.submitted = true; say("looks submitted - marked as Applied in the app ✓");
+    if (!ST.submitted && !ST.hinted && ST.total && SUBMITTED.test((document.body.innerText || "").slice(0, 20000))) {
+      ST.hinted = true; say("looks sent - press \"I submitted ✓\" to mark it Applied in the app");
     }
   }
   function cvBoxes() {
@@ -291,8 +324,12 @@
       return h ? "OK" : (opts.length ? "NONE" : "NOMENU");
     },
     option() { return OPT; },
+    arm() { ST.armed = true; run(); },          // the app's own "fill now" (the page cannot call this)
   };
   const mo = new MutationObserver(() => { clearTimeout(ST._t); ST._t = setTimeout(run, 700); });
-  const start = () => { bar_(); setTimeout(run, 1200); setTimeout(run, 4000); mo.observe(document.documentElement, { childList: true, subtree: true }); };
+  const start = () => {
+    bar_(); setTimeout(run, 1200); setTimeout(run, 4000); mo.observe(document.documentElement, { childList: true, subtree: true });
+    addEventListener("scroll", () => { clearTimeout(ST._s); ST._s = setTimeout(run, 400); }, { passive: true });   // fields you scroll to
+  };
   if (document.readyState !== "complete") window.addEventListener("load", start); else start();
 })();

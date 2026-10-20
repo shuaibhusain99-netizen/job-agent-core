@@ -35,20 +35,21 @@
     ]
   },
   "linkedin_guest": {
-    "_comment": "LinkedIn public listings, all countries. pages x queries x countries requests; polite delay. Skips the rest of a country on a challenge.",
+    "_comment": "LinkedIn public listings. Your search phrases are joined with OR into a few searches; at most max_requests per search, a random 1-2 s pause, and a full stop if LinkedIn asks to slow down.",
     "enabled": true,
-    "pages": 2,
-    "days": 14
+    "days": 14,
+    "pages_civil": 15,
+    "pages_other": 6,
+    "max_requests": 220
   },
   "workday": {
-    "_comment": "Employer career sites on Workday. tenant / host / site verified from the employer's careers URL: https://<tenant>.<host>.myworkdayjobs.com/<site>",
+    "_comment": "Employer career sites on Workday. Each employer's own country filter is found automatically. tenant / host / site from the careers URL: https://<tenant>.<host>.myworkdayjobs.com/<site>",
     "boards": [
       {
         "company": "Parsons",
         "tenant": "parsons",
         "host": "wd5",
-        "site": "Search",
-        "country_param": "locationCountry"
+        "site": "Search"
       },
       {
         "company": "KBR",
@@ -66,15 +67,13 @@
         "company": "AtkinsRéalis",
         "tenant": "slihrms",
         "host": "wd3",
-        "site": "Careers",
-        "country_param": "Location_Country"
+        "site": "Careers"
       },
       {
         "company": "Hitachi Energy",
         "tenant": "hitachi",
         "host": "wd1",
-        "site": "hitachi",
-        "country_param": "locationCountry"
+        "site": "hitachi"
       },
       {
         "company": "GE Vernova",
@@ -86,15 +85,13 @@
         "company": "JLL",
         "tenant": "jll",
         "host": "wd1",
-        "site": "jllcareers",
-        "country_param": "locationCountry"
+        "site": "jllcareers"
       },
       {
         "company": "EllisDon",
         "tenant": "ellisdon",
         "host": "wd3",
-        "site": "Ellis-Don",
-        "country_param": "locationCountry"
+        "site": "Ellis-Don"
       }
     ],
     "pages": 3
@@ -156,7 +153,8 @@
       {
         "company": "City of Vancouver",
         "base": "https://jobs.vancouver.ca",
-        "slug": ""
+        "slug": "",
+        "country": "Canada"
       }
     ]
   },
@@ -272,7 +270,7 @@
       }
     ]
   },
-  "_version": 5,
+  "_version": 6,
   "oracle": {
     "_comment": "Oracle Recruiting Cloud career sites (public JSON).",
     "pages": 2,
@@ -306,11 +304,6 @@
         "company": "Arcadis",
         "base": "https://ebcs.fa.em2.oraclecloud.com",
         "site": "CX_1"
-      },
-      {
-        "company": "Emaar",
-        "base": "https://emhm.fa.em2.oraclecloud.com",
-        "site": "CX_1001"
       }
     ]
   },
@@ -344,7 +337,10 @@
         "company": "NEOM",
         "host": "careers.neom.com",
         "domain": "neom.com",
-        "api": "v2"
+        "api": "v2",
+        "countries": [
+          "Saudi Arabia"
+        ]
       },
       {
         "company": "Worley",

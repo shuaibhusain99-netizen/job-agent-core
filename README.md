@@ -10,4 +10,5 @@ Personal data (tracker, packs, CV, mail settings, sent mail) is ignored by git �
 * `main.py`, `agent/` — search → score → packs → job list
 * `agent/browser.py`, `agent/filler.js` — "Apply on site": fills forms in an isolated browser world, never submits
 * `profile.json` — candidate facts (yours) + rule sets (program-maintained, `_rules_version`)
+* `tests/` — run on Windows before every build: `python -m unittest discover -s tests -t .` (no real website is contacted)
 * `.github/workflows/build-app.yml` — builds and smoke-tests the exe on a Windows runner, publishes it as a private release

@@ -9,7 +9,7 @@ The browser uses its own profile folder (data/browser-search), separate from the
 placed off-screen so it doesn't get in your way (sources.json -> browser_sites.show_window: true to watch it).
 """
 from __future__ import annotations
-import json, os, random, re, subprocess, threading, time
+import atexit, json, os, random, re, subprocess, threading, time
 from datetime import date, timedelta
 from pathlib import Path
 from urllib.parse import quote_plus
@@ -108,16 +108,16 @@ CHALLENGE_JS = r"""(() => /just a moment|security check|attention required|verif
 
 
 SITES = {
-    "indeed": {"name": "Indeed", "js": INDEED_JS, "detail": False, "group": True,  # human check on job pages; OR searches work
+    "indeed": {"name": "Indeed", "js": INDEED_JS, "detail": False, "group": True, "newest_first": True,  # human check on job pages
                "where": lambda c: INDEED_HOST.get(c),
                "url": lambda w, q, p: f"https://{w}/jobs?q={quote_plus(q)}&sort=date&fromage={window(21)}" + (f"&start={p * 10}" if p else "")},
     "bayt": {"name": "Bayt", "js": BAYT_JS, "detail": True, "where": lambda c: GULF_SLUG.get(c),
              "url": lambda w, q, p: f"https://www.bayt.com/en/{w}/jobs/{_slug(q)}-jobs/" + (f"?page={p + 1}" if p else "")},
-    "naukrigulf": {"name": "NaukriGulf", "js": NAUKRI_JS, "detail": True, "where": lambda c: GULF_SLUG.get(c),
+    "naukrigulf": {"name": "NaukriGulf", "js": NAUKRI_JS, "detail": True, "newest_first": True, "where": lambda c: GULF_SLUG.get(c),
                    "url": lambda w, q, p: f"https://www.naukrigulf.com/{_slug(q)}-jobs-in-{w}" + (f"-{p + 1}" if p else "") + "?sort=date"},
     "gulftalent": {"name": "GulfTalent", "js": GULFTALENT_JS, "detail": True, "where": lambda c: GULF_SLUG.get(c),
                    "url": lambda w, q, p: f"https://www.gulftalent.com/{w}/jobs/title/{_slug(q)}" + (f"/{p + 1}" if p else "")},
-    "jobbank": {"name": "Job Bank", "js": JOBBANK_JS, "detail": True, "where": lambda c: "ca" if c == "Canada" else None,
+    "jobbank": {"name": "Job Bank", "js": JOBBANK_JS, "detail": True, "newest_first": True, "where": lambda c: "ca" if c == "Canada" else None,
                 "url": lambda w, q, p: f"https://www.jobbank.gc.ca/jobsearch/jobsearch?searchstring={quote_plus(q)}&sort=D" + (f"&page={p + 1}" if p else "")},
 }
 SOURCE_NAMES = {s["name"] for s in SITES.values()}
@@ -133,7 +133,7 @@ def parse_age(text: str, today: date | None = None) -> str:
     today = today or date.today()
     if not t:
         return ""
-    if re.search(r"just|today|now|hour|min|sec|new", t):
+    if re.search(r"\b(just|today|now|hours?|hrs?|minutes?|mins?|seconds?|secs?|new)\b", t) and not re.search(r"\d+\+?\s*(day|week|month)", t):
         return today.isoformat()
     if "yesterday" in t:
         return (today - timedelta(days=1)).isoformat()
@@ -153,8 +153,8 @@ def parse_age(text: str, today: date | None = None) -> str:
             d = date(int(m.group(3) or today.year), MONTHS[m.group(2)], int(m.group(1)))
         except ValueError:
             return ""
-        if d > today + timedelta(days=1):
-            d = d.replace(year=d.year - 1)
+        if d > today + timedelta(days=1) and not m.group(3):
+            d = d.replace(year=d.year - 1)                  # "29 Dec" seen in October is last year's - unless the year was given
         return d.isoformat()
     return ""
 
@@ -172,8 +172,12 @@ class Session:
     def start(self) -> int:
         from .browser import find_browser, _free_port, _version
         with self.lock:
-            if self.proc is not None and self.proc.poll() is None and _version(self.port):
-                return self.port
+            if self.proc is not None and self.proc.poll() is None:
+                for _ in range(20):                     # it's running: wait for it to answer, never start a second one
+                    if _version(self.port):
+                        return self.port
+                    time.sleep(0.5)
+                raise RuntimeError("the search browser stopped answering")
             exe = find_browser()
             if not exe:
                 raise RuntimeError("no Edge or Chrome found")
@@ -189,14 +193,42 @@ class Session:
                 args[-1:-1] = ["--headless=new", "--no-sandbox"]          # only for testing on a machine without a screen
             kw = {"creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)} if os.name == "nt" else {}
             self.proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **kw)
+            self.port = port
             for _ in range(60):
                 if _version(port):
-                    self.port = port
                     return port
                 if self.proc.poll() is not None:
                     break
                 time.sleep(0.5)
+            self._kill()
             raise RuntimeError("the search browser did not start (is it already open with the same profile?)")
+
+    def _kill(self):
+        if self.proc is not None and self.proc.poll() is None:
+            try:
+                self.proc.terminate()
+                self.proc.wait(timeout=5)
+            except Exception:
+                try:
+                    self.proc.kill()
+                except Exception:
+                    pass
+        self.proc, self.port = None, 0
+
+    def drop_tab(self):
+        """Close this thread's tab (its site is done) so it doesn't keep running in the background."""
+        t = getattr(self.local, "tab", None)
+        if t is None:
+            return
+        try:
+            t.call("Page.close", timeout=5)
+        except Exception:
+            pass
+        try:
+            t.close()
+        except Exception:
+            pass
+        self.local.tab = None
 
     def tab(self):
         """One tab per thread, so each website is read in its own tab."""
@@ -233,11 +265,8 @@ class Session:
             try:
                 self.proc.wait(timeout=5)
             except Exception:
-                try:
-                    self.proc.terminate()
-                except Exception:
-                    pass
-        self.proc, self.port = None, 0
+                pass
+        self._kill()
 
 
 SESSION: Session | None = None
@@ -257,6 +286,9 @@ def close() -> None:
         SESSION = None
 
 
+atexit.register(close)              # the search browser never outlives the app, even after an error
+
+
 def _eval(tab, expr: str, timeout: float = 20):
     r = tab.call("Runtime.evaluate", timeout=timeout, expression=expr, returnByValue=True, awaitPromise=True)
     if r.get("exceptionDetails"):
@@ -266,12 +298,14 @@ def _eval(tab, expr: str, timeout: float = 20):
 
 def _goto(tab, url: str, settle: float = 2.0, timeout: float = 35) -> None:
     tab.call("Page.navigate", url=url, timeout=timeout)
-    end = time.time() + timeout
+    start = time.time()
+    end = start + timeout
     time.sleep(1.0)
     while time.time() < end:
         try:
-            if _eval(tab, "document.readyState", timeout=5) == "complete":
-                break
+            st = _eval(tab, "document.readyState", timeout=5)
+            if st == "complete" or (st == "interactive" and time.time() - start > 4):
+                break                                   # the page itself is there; slow ads and trackers aren't waited for
         except Exception:
             pass
         time.sleep(0.7)
@@ -280,6 +314,10 @@ def _goto(tab, url: str, settle: float = 2.0, timeout: float = 35) -> None:
 
 class Blocked(Exception):
     pass
+
+
+class NoList(Exception):
+    """The site's search pages keep showing no job list at all (site down, an error page, or its layout changed)."""
 
 
 def _check(tab, name: str) -> None:
@@ -297,6 +335,21 @@ def _check(tab, name: str) -> None:
         raise Blocked(name)
 
 
+def _list_rows(tab, js: str, name: str, wait: float = 4.0) -> list:
+    """The page's job rows - at once when the list is in the page, else after waiting a little for lists drawn after
+    loading. A page without rows may be a "verify you are human" page: that is checked then."""
+    rows = []
+    for i in range(int(wait / 0.5) + 1):
+        rows = _eval(tab, js) or []
+        if rows:
+            break
+        if i < int(wait / 0.5):
+            time.sleep(0.5)
+    if not rows:
+        _check(tab, name)
+    return rows if isinstance(rows, list) else []
+
+
 # ------------------------------------------------------------------ search
 def _read_site(key: str, cfg: dict, profile: dict, sess: Session) -> list[dict]:
     site = SITES[key]
@@ -308,19 +361,32 @@ def _read_site(key: str, cfg: dict, profile: dict, sess: Session) -> list[dict]:
         plan = [(" OR ".join(f'"{q}"' for q in queries), max(pages, int(cfg.get("group_pages", 6))))]
     else:
         plan = [(q, pages) for q in queries]
-    tab = sess.tab()
+    failures = empty = 0
     try:
+        tab = sess.tab()
         for country in countries(profile):
             where = site["where"](country)
             if not where:
                 continue
             for q, q_pages in plan:
                 for p in range(q_pages):
-                    _goto(tab, site["url"](where, q, p))
-                    _check(tab, name)
-                    rows = _eval(tab, site["js"]) or []
+                    try:
+                        _goto(tab, site["url"](where, q, p), settle=0.3)
+                        rows = _list_rows(tab, site["js"], name)
+                        failures = 0
+                    except Blocked:
+                        raise
+                    except Exception as e:                  # one page that didn't load: try the next search
+                        failures += 1
+                        if failures >= 3:
+                            raise RuntimeError(f"pages keep failing ({type(e).__name__})")
+                        break
                     if not isinstance(rows, list):
                         rows = []
+                    if not rows and not seen:
+                        empty += 1                          # nothing read from this site yet
+                        if empty >= 3:
+                            raise NoList(name)
                     new = unknown = 0
                     for r in rows[:60]:
                         if not isinstance(r, dict):
@@ -343,22 +409,28 @@ def _read_site(key: str, cfg: dict, profile: dict, sess: Session) -> list[dict]:
                             j["_snippet"] = True             # only the list's summary so far: worth opening the full ad
                         unknown += not util.is_known(j)
                         out.append(j)
-                    if new < 10 or not unknown:
-                        break                                # last page, or only jobs seen before
+                    if new < 10 or (site.get("newest_first") and not unknown):
+                        break                                # last page, or (newest first) only jobs seen before
                     time.sleep(random.uniform(1.5, 3.0))
                 time.sleep(random.uniform(1.5, 3.5))
     except Blocked:
+        BLOCKED.add(name)
         log(f"{name}: the site asked to verify you are human - skipped for this run ({len(seen)} jobs read before that). "
             f"It usually passes by itself next time.")
+    except NoList:
+        BLOCKED.add(name)
+        log(f"{name}: its search pages showed no job list three times - skipped for this run (the site may be down)")
     except Exception as e:
         log(f"{name}: stopped ({type(e).__name__}: {e})")
+    finally:
+        sess.drop_tab()
     log(f"{name}: {len(seen)} listings")
     return out
 
 
 def fetch(cfg: dict, profile: dict) -> list[dict]:
     """All enabled boards, each in its own tab, side by side."""
-    if not cfg.get("enabled", True):
+    if not cfg.get("enabled"):
         return []
     BLOCKED.clear()
     on = [k for k, v in (cfg.get("sites") or {k: True for k in SITES}).items() if v and k in SITES]
@@ -384,7 +456,7 @@ def enrich(j: dict) -> None:
     if j.get("source") not in DETAIL_SOURCES or SESSION is None or j["source"] in BLOCKED:
         return
     tab = SESSION.tab()
-    _goto(tab, j["url"], settle=1.5)
+    _goto(tab, j["url"], settle=0.5)
     try:
         _check(tab, j["source"])
     except Blocked:
@@ -393,6 +465,9 @@ def enrich(j: dict) -> None:
         return
     j.pop("_snippet", None)
     d = _eval(tab, DETAIL_JS) or {}
+    if len(str(d.get("description") or "")) < 300:            # an ad drawn after the page loaded: give it a moment
+        time.sleep(1.5)
+        d = _eval(tab, DETAIL_JS) or {}
     text = clean(str(d.get("description") or ""))[:6000]
     if len(text) > len(j.get("description", "")):
         j["description"] = text

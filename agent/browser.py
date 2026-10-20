@@ -12,6 +12,8 @@ import base64, json, os, socket, struct, subprocess, threading, time, urllib.req
 from pathlib import Path
 from urllib.parse import urlparse
 
+from .util import fill_in
+
 HERE = Path(__file__).resolve().parent
 
 
@@ -259,12 +261,12 @@ def _host_ok(url: str) -> bool:
 
 def filler_script(profile: dict, job: dict, years: int) -> str:
     js = (HERE / "filler.js").read_text(encoding="utf-8")
-    host = (urlparse(job.get("url", "")).hostname or "").lower()
-    ctx = {"profile": {k: profile.get(k) for k in ("candidate", "form_answers", "screening_answers")},
+    answers = {k: fill_in(v, profile, years) for k, v in (profile.get("screening_answers") or {}).items()}
+    ctx = {"profile": {"candidate": profile.get("candidate"), "form_answers": profile.get("form_answers"), "screening_answers": answers},
            "years": years,
            "job": {k: job.get(k, "") for k in ("title", "company", "country", "location")},
            "cover_letter": job.get("cover_letter", ""),
-           "hosts": sorted(set(TRUSTED_HOSTS + ([host[4:] if host.startswith("www.") else host] if host else [])))}
+           "hosts": TRUSTED_HOSTS}          # the job's own site is NOT auto-filled: you press "Fill this page" there
     # JSON is a JS literal; escape "</" and U+2028/9 so it can never break out of the script
     lit = json.dumps(ctx, ensure_ascii=True).replace("</", "<\\/")
     return js.replace("__JOBAGENT_CONTEXT__", lit)

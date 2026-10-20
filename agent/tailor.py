@@ -8,7 +8,7 @@ Produces for each matched job:
 from __future__ import annotations
 import re
 from datetime import date
-from .util import years_experience
+from .util import years_experience, fill_in
 
 
 # Per role family: how the letter introduces you, which evidence leads, and the CV-summary headline.
@@ -102,13 +102,25 @@ def _company(j: dict) -> str:
 
 
 def _place(j: dict) -> str:
-    """'Riyadh, Saudi Arabia' from whatever the source gave ('AE - Dubai', 'Riyadh, Riyadh, Saudi Arabia', 'Not specified')."""
-    loc = re.sub(r"^[A-Z]{2,3}\s*-+\s*", "", (j.get("location") or "").strip())
+    """'Riyadh, Saudi Arabia' from whatever the source gave ('AE - Dubai', 'Riyadh, Riyadh, Saudi Arabia', 'Not specified',
+    'CA.ON.Toronto.191 The West Mall', 'SA.Site Office.Saudi Arabia Site Offices')."""
+    raw = (j.get("location") or "").strip()
+    country = j.get("country") or ""
+    if re.match(r"^[A-Z]{2,3}\.", raw) or re.search(r"\d{2,}|site offices?", raw, re.I):
+        # an internal location code: keep only a known city name, if there is one, and the country
+        from .util import _CITY_RX
+        city = next((m.group(0) for c, rx in _CITY_RX if c == country for m in [rx.search(raw)] if m), "")
+        if not city:
+            parts = [p for p in re.split(r"[.,]", raw) if re.fullmatch(r"[A-Za-z][A-Za-z \-']{2,}", p.strip() or "-")]
+            city = next((p.strip() for p in parts if not re.search(r"site|office|area|region|province|state|metropolitan", p, re.I)
+                         and p.strip().lower() != country.lower()), "")
+        place = ", ".join(x for x in (city.title() if city.isupper() else city, country if country != "Other" else "") if x)
+        return re.sub(r"\bUnited Arab Emirates\b", "the United Arab Emirates", place) if place == "United Arab Emirates" else place
+    loc = re.sub(r"^[A-Z]{2,3}\s*-+\s*", "", raw)
     parts = []
     for p in (x.strip() for x in loc.split(",")):
         if p and p.lower() not in ("not specified", "remote", "other") and p.lower() not in (x.lower() for x in parts):
             parts.append(p)
-    country = j.get("country") or ""
     if country and country != "Other" and not any(country.lower() in p.lower() for p in parts):
         parts.append(country)
     text = ", ".join(parts[-2:]) if len(parts) > 2 else ", ".join(parts)
@@ -138,18 +150,23 @@ def answer_for(question: str, profile: dict) -> str | None:
         if pat.startswith("_"):
             continue
         if re.search(pat, question, re.I):
-            return ans
+            return fill_in(ans, profile)
     return None
+
+
+def _md(s) -> str:
+    """Text from a job site, written into a Markdown pack: no live links or tags."""
+    return re.sub(r"([\[\]<>`])", r"\\\1", str(s or ""))
 
 
 def application_pack(j: dict, profile: dict) -> str:
     qa = screening_answers(j, profile)
     lines = [
-        f"# {j['title']} — {j['company']}",
-        f"Location: {j['location']} ({j.get('country') or 'country n/a'})  ",
-        f"Source: {j['source']}  ",
-        f"Link: {j['url']}  ",
-        f"Score: {j['match_score']} ({j['verdict']}) — {j['reasons']}",
+        f"# {_md(j['title'])} — {_md(j['company'])}",
+        f"Location: {_md(j['location'])} ({j.get('country') or 'country n/a'})  ",
+        f"Source: {_md(j['source'])}  ",
+        f"Link: <{j['url']}>  " if re.match(r"https?://[^\s<>]+$", j.get("url") or "") else "Link: (none)  ",
+        f"Score: {j['match_score']} ({j['verdict']}) — {_md(j['reasons'])}",
         "",
         "## CV summary for this application",
         summary(j, profile),
@@ -161,7 +178,7 @@ def application_pack(j: dict, profile: dict) -> str:
     ]
     if qa:
         for q, a in qa:
-            lines += [f"**Q:** {q}", f"**A:** {a}", ""]
+            lines += [f"**Q:** {_md(q)}", f"**A:** {a}", ""]
     else:
         lines.append("_No explicit questions found in the posting. Standard answers are in profile.json → screening_answers._")
     return "\n".join(lines)
