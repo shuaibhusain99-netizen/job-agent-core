@@ -47,7 +47,8 @@ def main() -> int:
 
     # 1. search - only what's new since the last search, with a full search every few days
     known = tracker.load(TRACKER)
-    util.KNOWN = {dedupe_key(r) for r in known.values()}
+    seen_before = _load_seen()
+    util.KNOWN = {dedupe_key(r) for r in known.values()} | set(seen_before)
     full, sig = plan_search(args.full)
     log("Full search (all recent ads)" if not util.WINDOW_DAYS else
         f"Quick search: ads from the last {util.WINDOW_DAYS} days (a full search runs every {full_every()} days)")
@@ -200,6 +201,7 @@ def main() -> int:
         return 0
     tracker.save(TRACKER, known)
     save_state(full, sig)
+    _save_seen(seen_before, unique)
     details.prune(tracker.load(TRACKER).keys())
     return 0
 
@@ -238,6 +240,27 @@ def plan_search(force_full: bool = False) -> tuple[bool, str]:
             or (today - last_full).days >= full_every() or (today - last_ok).days > 10)
     util.WINDOW_DAYS = None if full else max(2, (today - last_ok).days + 2)
     return full, sig
+
+
+def _load_seen() -> dict:
+    """Every job any search has listed in the last 30 days (also the ones judged not relevant, which aren't in your
+    list): lets LinkedIn paging stop when a page holds nothing new."""
+    try:
+        d = json.loads((ROOT / "seen.json").read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_seen(seen: dict, unique: dict) -> None:
+    today = date.today().isoformat()
+    cut = (date.today() - timedelta(days=30)).isoformat()
+    keep = {k: v for k, v in seen.items() if isinstance(v, str) and v >= cut}
+    keep.update({k: today for k in unique})
+    try:
+        tracker.atomic_write(ROOT / "seen.json", json.dumps(keep, separators=(",", ":")))
+    except OSError:
+        pass
 
 
 def save_state(full: bool, sig: str) -> None:

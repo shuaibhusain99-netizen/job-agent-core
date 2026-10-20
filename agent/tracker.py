@@ -202,6 +202,9 @@ def refresh(row: dict, j: dict, apply_countries: list[str] | None = None) -> str
     new_len = len(j.get("description", ""))
     if new_len < _known_len(row):
         return changed
+    if new_len > _known_len(row):
+        row["desc_len"] = new_len                       # remember the full ad was read, so it isn't fetched again
+        changed = "updated"
     if j["verdict"] == "reject":
         row["status"], row["verdict"], row["notes"] = "Skipped", "reject", ("auto: " + j["reasons"])[:200]
         row["desc_len"] = new_len
