@@ -979,7 +979,7 @@ dialog.send #mcAd{min-height:90px}
   $("mSave").addEventListener("click",async()=>{ if(!$("mUser").reportValidity()||!$("mPort").reportValidity()) return;
     try{ const d={preset:$("mPreset").value,smtp_host:$("mHost").value.trim(),smtp_port:+$("mPort").value||587,user:$("mUser").value.trim(),from_name:$("mName").value.trim(),cc_self:$("mCc").checked}; if($("mPw").value) d.password=$("mPw").value;
       const r=await api("/api/mail",d); if(r.ok===false) throw new Error(r.error); $("mPw").value=""; toast(r.has_password?"E-mail settings saved":"Saved - enter the app password for this account"); await loadMail();
-      if(r.has_password&&!r.blocked&&r.signin!=="ok") testMail(); }catch(e){ toast("Not saved: "+e.message); } });
+      if(r.has_password&&!r.blocked&&r.signin!=="ok") testMail(); }catch(e){ note($("mNote"),"bad","Not saved: "+e.message); } });
   $("mTest").addEventListener("click",testMail);
   $("mCv").addEventListener("change",async()=>{ const f=$("mCv").files[0]; if(!f) return; const buf=new Uint8Array(await f.arrayBuffer()); let bin=""; for(let i=0;i<buf.length;i+=8192) bin+=String.fromCharCode.apply(null,buf.subarray(i,i+8192)); try{ const r=await api("/api/cv",{name:f.name,data:btoa(bin)}); toast(r.ok?"CV saved: "+r.name:(r.error||"Not saved")); loadMail(); }catch(e){ toast("Not saved: "+e.message); } });
 

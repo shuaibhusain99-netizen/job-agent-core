@@ -249,8 +249,20 @@ class AppAPI(unittest.TestCase):
             self.assertNotIn("SMTPAuthenticationError", r["error"] + t["message"])
             self.assertEqual(json.loads(self.req("GET", "/api/mail")[2])["signin"], "failed")
             # Gmail with a wrong password: told to use an app password
-            (app.DATA / "mail.json").write_text('{"user": "me@gmail.com", "password": "pw", "preset": "gmail"}', encoding="utf-8")
+            # a normal Gmail password (not a 16-letter app password) is caught before Gmail hangs up on it
+            (app.DATA / "mail.json").write_text('{"user": "me@gmail.com", "password": "Secret_1234", "preset": "gmail"}', encoding="utf-8")
+            self.assertIn("isn't a Gmail app password", json.loads(self.req("GET", "/api/mail")[2])["blocked"])
+            st, _, body = self.req("POST", "/api/mail", {"password": "Secret_1234"})
+            self.assertEqual(st, 400); self.assertIn("16 letters", json.loads(body)["error"])
+            (app.DATA / "mail.json").write_text('{"user": "me@gmail.com", "password": "abcdefghijklmnop", "preset": "gmail"}', encoding="utf-8")
             self.assertEqual(json.loads(self.req("GET", "/api/mail")[2])["blocked"], "")
+            class Hangup:
+                def __init__(self, *a, **k): pass
+                def ehlo(self): pass
+                def starttls(self, **k): pass
+                def login(self, u, p): raise smtplib.SMTPServerDisconnected("Connection unexpectedly closed")
+            with mock.patch.object(app.smtplib, "SMTP", Hangup):
+                self.assertIn("app password", json.loads(self.req("POST", "/api/mail-test", {})[2])["message"])
             def refuse(m): raise smtplib.SMTPAuthenticationError(535, b"5.7.8 Username and Password not accepted")
             with mock.patch.object(app, "smtp_connect", refuse):
                 t = json.loads(self.req("POST", "/api/mail-test", {})[2])

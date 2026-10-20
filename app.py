@@ -408,8 +408,23 @@ GMAIL_FIX = ("Use a Gmail address instead: turn on 2-Step Verification in your G
              "myaccount.google.com/apppasswords, then put that address and the 16-letter app password in Settings > E-mail.")
 
 
+def app_password_problem(preset: str, pw: str) -> str:
+    """Gmail and Yahoo only take a 16-letter app password from apps - a normal password is refused every time."""
+    if preset in ("gmail", "yahoo") and pw and not re.fullmatch(r"[A-Za-z]{16}", re.sub(r"\s", "", pw)):
+        name = "Gmail" if preset == "gmail" else "Yahoo"
+        n = len(re.sub(r"\s", "", pw))
+        where = "myaccount.google.com/apppasswords (2-Step Verification must be on)" if preset == "gmail" else "Yahoo Account Security > Generate app password"
+        return (f"That isn't a {name} app password - those are exactly 16 letters (like abcd efgh ijkl mnop), and this one is "
+                f"{n} characters. It looks like your normal password, which {name} refuses from apps. "
+                f"Create an app password at {where} and paste it in.")
+    return ""
+
+
 def mail_blocked(m: dict) -> str:
     """Why these settings can't work at all (Outlook.com / Hotmail stopped password sign-in for apps in 2026), or ''."""
+    bad_pw = app_password_problem(m.get("preset", ""), m.get("password", ""))
+    if bad_pw:
+        return bad_pw
     host = PRESETS.get(m.get("preset", ""), (m.get("smtp_host", ""), 0))[0].lower()
     if "outlook.com" in host or (MS_PERSONAL.search(m.get("user", "")) and "office365" not in host and m.get("preset") != "gmail"):
         return ("Outlook.com / Hotmail no longer lets apps sign in with a password - Microsoft switched it off in 2026. " + GMAIL_FIX)
@@ -443,7 +458,10 @@ def smtp_connect(m: dict):
         raise smtplib.SMTPAuthenticationError(535, b"basic authentication is disabled")   # don't trigger a Microsoft security alert
     s = smtplib.SMTP(host, port, timeout=30)
     s.ehlo(); s.starttls(context=ssl.create_default_context()); s.ehlo()
-    s.login(m["user"], m["password"])
+    try:
+        s.login(m["user"], m["password"])
+    except smtplib.SMTPServerDisconnected:          # Gmail hangs up on a normal (non-app) password instead of saying no
+        raise smtplib.SMTPAuthenticationError(535, b"the server closed the connection at sign-in") from None
     return s
 
 
@@ -987,7 +1005,13 @@ class Handler(BaseHTTPRequestHandler):
             if "cc_self" in d:
                 m["cc_self"] = bool(d["cc_self"])
             if d.get("password"):
-                m["password"] = str(d["password"])
+                pw = str(d["password"])
+                if m.get("preset") in ("gmail", "yahoo"):
+                    pw = re.sub(r"\s", "", pw)              # Google shows it as four groups of four
+                bad = app_password_problem(m.get("preset", ""), pw)
+                if bad:
+                    return self._json({"ok": False, "error": bad}, 400)
+                m["password"] = pw
             if d.get("password") or before != (m.get("preset"), m.get("smtp_host"), m.get("smtp_port"), m.get("user")):
                 m.pop("signin", None); m.pop("signin_error", None)     # new settings: not tried yet
             save_mail(m)
