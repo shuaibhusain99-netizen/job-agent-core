@@ -1097,6 +1097,6 @@
       "cost engineer",
       "estimator"
     ],
-    "context": "\\b(civil|construction|constructions|contracting|contractors?|infrastructure|roads?|highways?|bridges?|utilit(y|ies)|water|wastewater|sewer(age)?|drainage|stormwater|storm water|pipelines?|earthworks?|concrete|structural|buildings?|fit-?out|asphalt|pavements?|airport|airfield|metro|tunnel(l)?ing|marine works|ports?|municipal(ity)?|land development|subdivision|geotechnical|surveying|epc|qa/?qc|formwork|excavation|reinforcement|real estate|developer|property|precast|ready-?mix|quarry|dredging|landscape|irrigation|district cooling|substructure|superstructure)\\b"
+    "context": "\\b(civil|construction|constructions|contracting|contractors?|infrastructure|roads?|highways?|bridges?|utilit(y|ies)|water|wastewater|sewer(age)?|drainage|stormwater|storm water|pipelines?|earthworks?|concrete|structural|buildings?|fit-?out|asphalt|pavements?|airport|airfield|metro|rail|railways?|developments|villas?|towers?|fa[cç]ades?|finishing|mep|tunnel(l)?ing|marine works|ports?|municipal(ity)?|land development|subdivision|geotechnical|surveying|epc|qa/?qc|formwork|excavation|reinforcement|real estate|developer|property|precast|ready-?mix|quarry|dredging|landscape|irrigation|district cooling|substructure|superstructure)\\b"
   }
 }

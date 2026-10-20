@@ -274,7 +274,7 @@ def _score_one(j: dict, profile: dict, cat: str, c: dict) -> tuple[int, str, lis
         reasons.append("industry unclear" if short else "not construction/utility/industrial")
     gen = profile.get("generic_titles") or {}
     if gen.get("context") and matched and all(t in gen.get("titles", []) for t in matched) \
-            and not re.search(gen["context"], ctx_text, re.I):
+            and not re.search(r"\bsite\b", title) and not re.search(gen["context"], ctx_text, re.I):
         pts -= 10 if short else 25
         reasons.append("industry unclear" if short else "not clearly civil / construction work")
 
