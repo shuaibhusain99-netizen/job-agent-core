@@ -8,6 +8,8 @@ Nothing is written to a data folder except a temporary browser profile under the
 import json, sys, tempfile, time
 from pathlib import Path
 
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")     # Arabic company names on a Windows console
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from agent import sitebrowse, util  # noqa: E402
 
