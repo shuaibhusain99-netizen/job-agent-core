@@ -218,7 +218,7 @@ def launch(profile_dir: Path, headless: bool = False) -> int:
     profile_dir.mkdir(parents=True, exist_ok=True)
     port = _free_port()
     args = [exe, f"--remote-debugging-port={port}", "--remote-debugging-address=127.0.0.1", f"--user-data-dir={profile_dir}",
-            "--no-first-run", "--no-default-browser-check", "--disable-features=TranslateUI", "--new-window", "about:blank"]
+            "--no-first-run", "--no-default-browser-check", "--disable-features=TranslateUI", "--disable-sync", "--new-window", "about:blank"]
     if headless:
         args += ["--headless=new", "--disable-gpu", "--no-sandbox"]
     kw = {}
