@@ -5,3 +5,13 @@ data/
 build/
 dist/
 *.spec
+
+# personal data never belongs in this repo (the app keeps it in data/ on the PC)
+tracker.csv
+applications/
+reports/
+run-request.txt
+data/
+*.eml
+mail.json
+CV.pdf
