@@ -12,7 +12,11 @@ BASE_HEADERS = {"User-Agent": UA, "Accept-Language": "en-US,en;q=0.9", "Accept-E
 _LOG_LOCK = threading.Lock()
 
 
+SECRET_IN_URL = re.compile(r"(jooble\.org/api/)[^\s/?#]+|([?&](?:key|api_key|apikey|token|access_token)=)[^\s&#]+", re.I)
+
+
 def log(msg: str) -> None:
+    msg = SECRET_IN_URL.sub(lambda m: (m.group(1) or m.group(2)) + "<key>", str(msg))    # keys never reach the log or the page
     with _LOG_LOCK:                       # sources run side by side: one whole line at a time
         try:
             print(msg, file=sys.stderr, flush=True)

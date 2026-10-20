@@ -159,22 +159,22 @@ class BrowserBoards(unittest.TestCase):
         util.KNOWN = self.known
         sitebrowse.BLOCKED.clear()
 
-    def test_indeed_searches_all_phrases_at_once_newest_first(self):
+    def test_indeed_searches_phrases_in_bracketed_groups_one_page_each(self):
         tab = FakeTab()
-        jobs = sitebrowse._read_site("indeed", {"queries": ["civil engineer", "site engineer"], "group_pages": 3},
+        jobs = sitebrowse._read_site("indeed", {"queries": ["civil engineer", "site engineer", "quantity surveyor", "hse officer"]},
                                      gulf_profile("Saudi Arabia"), FakeSession(tab))
-        self.assertEqual(len(tab.urls), 3)                                  # one grouped search, paged to the limit
-        self.assertIn("q=%22civil+engineer%22+OR+%22site+engineer%22", tab.urls[0])
+        self.assertEqual(len(tab.urls), 2)                                  # 3 phrases per search; page 2 needs a sign-in
+        self.assertIn("q=%28%22civil+engineer%22+OR+%22site+engineer%22+OR+%22quantity+surveyor%22%29", tab.urls[0])
         self.assertIn("sort=date", tab.urls[0])
-        self.assertIn("&start=10", tab.urls[1])
-        self.assertEqual(len(jobs), 30)
+        self.assertNotIn("start=", " ".join(tab.urls))
+        self.assertEqual(len(jobs), 20)
         self.assertEqual(jobs[0]["country"], "Saudi Arabia")
         self.assertEqual(jobs[0]["posted"], (date.today().fromordinal(date.today().toordinal() - 2)).isoformat())
 
     def test_paging_stops_when_a_page_holds_only_jobs_already_in_the_list(self):
         util.KNOWN = {f"indeed:p2x{i}" for i in range(10)}                 # page 2 was all seen in an earlier search
         tab = FakeTab()
-        sitebrowse._read_site("indeed", {"queries": ["civil engineer"], "group_pages": 6}, gulf_profile("Saudi Arabia"), FakeSession(tab))
+        sitebrowse._read_site("naukrigulf", {"queries": ["civil engineer"], "pages": 6}, gulf_profile("Saudi Arabia"), FakeSession(tab))
         self.assertEqual(len(tab.urls), 2)
 
     def test_a_short_page_is_the_last_page(self):
@@ -200,6 +200,19 @@ class BrowserBoards(unittest.TestCase):
     def test_switched_off_boards_are_not_opened(self):
         self.assertEqual(sitebrowse.fetch({"enabled": False, "sites": {"indeed": True}}, PROFILE), [])
         self.assertEqual(sitebrowse.fetch({"enabled": True, "sites": {"indeed": False, "bayt": False}}, PROFILE), [])
+
+
+class Logs(unittest.TestCase):
+    def test_keys_never_reach_the_log(self):
+        import io, contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            util.log("  network error https://sa.jooble.org/api/34b9bf41-aaaa-bbbb: timed out")
+            util.log("GET https://x.example/search?q=a&api_key=SECRET123&page=2")
+        out = buf.getvalue()
+        self.assertNotIn("34b9bf41", out)
+        self.assertNotIn("SECRET123", out)
+        self.assertIn("jooble.org/api/<key>", out)
 
 
 class Placeholders(unittest.TestCase):

@@ -357,8 +357,11 @@ def _read_site(key: str, cfg: dict, profile: dict, sess: Session) -> list[dict]:
     queries = cfg.get("queries") or DEFAULT_QUERIES
     pages = max(1, int(cfg.get("pages", 1)))
     out, seen = [], set()
-    if site.get("group"):                # one search with all phrases joined by OR, newest first, paged until nothing is new
-        plan = [(" OR ".join(f'"{q}"' for q in queries), max(pages, int(cfg.get("group_pages", 6))))]
+    if site.get("group"):
+        # Indeed: phrases joined as ("a" OR "b" OR "c") - without the brackets Indeed finds almost nothing - and only the
+        # first page of each search (Indeed asks to sign in for page 2)
+        n = max(1, int(cfg.get("group_size", 3)))
+        plan = [("(" + " OR ".join(f'"{q}"' for q in queries[i:i + n]) + ")", 1) for i in range(0, len(queries), n)]
     else:
         plan = [(q, pages) for q in queries]
     failures = empty = 0
