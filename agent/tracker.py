@@ -16,7 +16,7 @@ from .util import log
 
 FIELDS = ["found_date", "score", "verdict", "title", "company", "location", "country", "source",
           "url", "status", "applied_date", "notes", "pack_file", "user_notes", "category", "sector", "salary", "apply_email",
-          "posted", "desc_len"]
+          "posted", "desc_len", "level", "ai_fit", "ai_summary"]
 USER_FIELDS = ("status", "applied_date", "user_notes")
 OPEN = ("New", "Review")
 
@@ -169,7 +169,8 @@ def row_from_job(j: dict) -> dict:
         "status": {"apply": "New", "found": "Found (apply off)"}.get(j["verdict"], "Review"), "applied_date": "", "notes": j["reasons"][:200],
         "pack_file": j.get("pack_file", ""), "user_notes": "", "category": j.get("category", "civil"),
         "sector": j.get("sector", ""), "salary": j.get("salary", ""), "apply_email": j.get("apply_email", ""),
-        "posted": j.get("posted", ""), "desc_len": len(j.get("description", "")),
+        "posted": j.get("posted", ""), "desc_len": len(j.get("description", "")), "level": j.get("level", ""),
+        "ai_fit": (j.get("ai") or {}).get("fit", ""), "ai_summary": (j.get("ai") or {}).get("summary", "")[:200],
     }
 
 
@@ -204,6 +205,8 @@ def refresh(row: dict, j: dict, apply_countries: list[str] | None = None) -> str
     if j["verdict"] == "reject":
         row["status"], row["verdict"], row["notes"] = "Skipped", "reject", ("auto: " + j["reasons"])[:200]
         row["desc_len"] = new_len
+        if j.get("ai"):
+            row["ai_fit"], row["ai_summary"] = j["ai"].get("fit", ""), j["ai"].get("summary", "")[:200]
         return "skipped"
     status = "New" if j["verdict"] == "apply" else "Review"
     if status == "New" and apply_countries is not None and j.get("country") not in apply_countries:
@@ -211,7 +214,9 @@ def refresh(row: dict, j: dict, apply_countries: list[str] | None = None) -> str
     if (str(row.get("score")), row.get("status"), row.get("category"), row.get("sector")) != \
             (str(j["match_score"]), status, j.get("category"), j.get("sector", "")):
         row.update(score=j["match_score"], verdict=j["verdict"], status=status, notes=j["reasons"][:200],
-                   category=j.get("category", row.get("category")), sector=j.get("sector", ""), desc_len=new_len)
+                   category=j.get("category", row.get("category")), sector=j.get("sector", ""), desc_len=new_len,
+                   level=j.get("level", row.get("level", "")), ai_fit=(j.get("ai") or {}).get("fit", row.get("ai_fit", "")),
+                   ai_summary=(j.get("ai") or {}).get("summary", row.get("ai_summary", ""))[:200])
         changed = "updated"
     return changed
 
@@ -250,12 +255,13 @@ def retag_old_rows(rows: dict[str, dict], profile: dict) -> int:
     from .score import score
     n = 0
     for r in rows.values():
-        if (r.get("desc_len") or "").strip():
+        if (r.get("desc_len") or "").strip() and (r.get("level") or "").strip():
             continue
         j = {"title": r.get("title", ""), "company": r.get("company", ""), "location": r.get("location", ""),
              "country": r.get("country", ""), "description": "", "source": r.get("source", ""), "url": r.get("url", "")}
         score(j, profile)
-        r["category"], r["sector"] = j["category"], j["sector"]
-        r["desc_len"] = str(_known_len(r))
+        r["category"], r["sector"], r["level"] = j["category"], j["sector"], j.get("level", "")
+        if not (r.get("desc_len") or "").strip():
+            r["desc_len"] = str(_known_len(r))
         n += 1
     return n

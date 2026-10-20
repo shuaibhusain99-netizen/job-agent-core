@@ -87,6 +87,25 @@ def find_sector(j: dict, profile: dict) -> str:
     return ""
 
 
+def find_level(j: dict, profile: dict) -> str:
+    """starter / support / match / senior - from the title first, then the experience the ad asks for."""
+    lv = profile.get("levels") or {}
+    t = j["title"].lower()
+    for name in ("senior", "starter", "support"):
+        if lv.get(name) and re.search(lv[name], t, re.I):
+            return name
+    lo, _ = required_years((j["title"] + " " + j.get("description", "")).lower())
+    if lo is not None:
+        yrs = years_experience(profile)
+        if lo <= 2 and yrs > 2:
+            return "starter"
+        if lo >= yrs + 3:
+            return "senior"
+    if lv.get("starter") and re.search(lv["starter"], j.get("description", "")[:600], re.I):
+        return "starter"
+    return "match"
+
+
 def _word(term: str) -> str:
     return r"(?<![a-z])" + re.escape(term) + r"(?![a-z])"
 
@@ -146,6 +165,7 @@ def score(j: dict, profile: dict) -> tuple[int, str, list[str]]:
         if best is None or s > best[0]:
             best = (s, v, r, key)
     j["category"] = best[3]
+    j["level"] = find_level(j, profile)
     j["salary"] = find_salary(j["title"] + " " + j.get("description", ""))
     j["apply_email"] = find_apply_email(j.get("description", ""))
     reasons = list(best[2])

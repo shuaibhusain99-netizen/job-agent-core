@@ -10,10 +10,10 @@ import argparse, hashlib, json, sys
 from datetime import date
 from pathlib import Path
 
-from agent.sources import fetch_all, enrich_many
+from agent.sources import fetch_all, enrich_many, load_keys
 from agent.score import score
 from agent.tailor import application_pack
-from agent import tracker
+from agent import tracker, ai, details
 from agent.util import dedupe_key, log, countries
 
 ROOT = Path(__file__).resolve().parent
@@ -24,7 +24,13 @@ REPORTS = ROOT / "reports"
 PACKS = ROOT / "applications"
 
 
+CATEGORY_NAMES = {"civil"} | {k for k in PROFILE.get("categories", {}) if not k.startswith("_")}
+
+
 def main() -> int:
+    global CATEGORY_NAMES
+    CATEGORY_NAMES = {"civil"} | {k for k in PROFILE.get("categories", {}) if not k.startswith("_")}
+    details.ROOT = ROOT / "details"
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry", action="store_true", help="don't write tracker/sheet")
     ap.add_argument("--max-enrich", type=int, default=300, help="how many jobs get their full ad fetched (best first)")
@@ -88,6 +94,33 @@ def main() -> int:
     jobs.sort(key=lambda j: -j["match_score"])
     log(f"Fetched full descriptions for {fetched} jobs")
 
+    # 3b. AI reviewer (optional): reads the promising ads like a recruiter and has the final say on fit
+    keys = load_keys()
+    if ai.settings(keys):
+        ai.USAGE = ROOT / "ai_usage.json"
+        cand = [j for j in jobs if j["verdict"] != "reject" and (not j["_known"] or tracker._untouched(known[j["_known"]]))]
+        ai.review_many(cand, PROFILE, keys, cache_get=lambda u: details.load(u).get("ai") or {},
+                       cache_put=lambda u, r: details.save(u, {"ai": r}))
+        for j in cand:
+            r = j.get("ai")
+            if not r:
+                continue
+            cat = r["role_family"] if r["role_family"] in CATEGORY_NAMES else j.get("category")
+            sp = PROFILE["search"]
+            thr = sp["min_score"] if cat == "civil" else (sp.get("min_score_oilgas", sp["min_score"]) if cat == "oil_gas" else sp.get("min_score_other", sp["min_score"] + 5))
+            j["match_score"], j["verdict"] = ai.combine(j["match_score"], j["verdict"], r, thr)
+            j["category"] = cat
+            j["level"] = r["level"] or j.get("level", "")
+            j["reasons"] = (f"AI {r['fit']}: {r['summary']}" + (f" | deal-breakers: {'; '.join(r['deal_breakers'])}" if r['deal_breakers'] else "")
+                            + " || rules: " + j["reasons"])
+        jobs.sort(key=lambda j: -j["match_score"])
+
+    # keep the ad text for the app's detail view
+    for j in jobs:
+        if j["verdict"] != "reject" and len(j.get("description", "")) >= 80:
+            details.save(j["url"], {"title": j["title"], "company": j["company"], "description": j["description"][:8000],
+                                    "posted": j.get("posted", ""), "source": j["source"]})
+
     # 4. update known jobs, add new ones, write application packs for new matches
     apply_countries = countries(PROFILE, "apply")
     new_rows, updated, skipped = [], 0, 0
@@ -139,6 +172,7 @@ def main() -> int:
         print("\n(dry run: job list not updated)")
         return 0
     tracker.save(TRACKER, known)
+    details.prune(tracker.load(TRACKER).keys())
     return 0
 
 

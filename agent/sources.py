@@ -20,7 +20,7 @@ def all_queries(profile: dict) -> list[str]:
     """civil + other + oil & gas search phrases, de-duplicated, order kept."""
     sp = profile["search"]
     out, seen = [], set()
-    for q in sp["queries"] + sp.get("queries_other", []) + sp.get("queries_oilgas", []):
+    for q in sp["queries"] + sp.get("queries_other", []) + sp.get("queries_oilgas", []) + sp.get("queries_entry", []):
         if q.lower() not in seen:
             seen.add(q.lower())
             out.append(q)
@@ -295,7 +295,7 @@ def fetch_workday(cfg: dict, profile: dict) -> list[dict]:
                     if country and country not in countries(profile):
                         continue
                     mine.append(job(p.get("title"), b["company"], loc or country, f"{base}/{b['site']}{path}", "",
-                                    "Workday", country, _wd_posted(p.get("postedOn", ""))))
+                                    "Career site", country, _wd_posted(p.get("postedOn", ""))))
                 time.sleep(0.4)
                 if len(rows) < 20 or (page + 1) * 20 >= int(data.get("total") or 0):
                     break
@@ -363,7 +363,7 @@ def fetch_successfactors(cfg: dict, profile: dict) -> list[dict]:
                 country = guess_country(loc)
                 if country and country not in countries(profile):
                     continue
-                out.append(job(title, b["company"], loc, urljoin(b["base"], href), "", "SuccessFactors", country))
+                out.append(job(title, b["company"], loc, urljoin(b["base"], href), "", "Career site", country))
             time.sleep(0.5)
         log(f"SuccessFactors {b['company']}: {len(seen)} rows")
     return out
@@ -407,7 +407,7 @@ def fetch_workable(cfg: dict, profile: dict) -> list[dict]:
             if country and country not in countries(profile):
                 continue
             url = f"https://apply.workable.com/{a['account']}/j/{r.get('shortcode')}/"
-            out.append(job(r.get("title"), a["company"], loc_txt, url, "", "Workable", country, (r.get("published") or "")[:10]))
+            out.append(job(r.get("title"), a["company"], loc_txt, url, "", "Career site", country, (r.get("published") or "")[:10]))
             n += 1
         log(f"Workable {a['company']}: {n} rows")
         time.sleep(2)
@@ -570,8 +570,74 @@ def fetch_wordpress(cfg: dict, profile: dict) -> list[dict]:
         log(f"{site['name']} (newspaper ads): {n} posts")
     return out
 
+# ---------------------------------------------------------------- Oracle Recruiting Cloud (many large Gulf employers)
+ORC_QUERIES = ["civil", "site engineer", "QA/QC", "planning", "quantity surveyor", "HSE", "storekeeper", "graduate"]
+
+
+def fetch_oracle(cfg: dict, profile: dict) -> list[dict]:
+    """Public JSON behind Oracle's candidate-experience career sites: <base>/hcmUI/CandidateExperience/en/sites/<site>."""
+    out = []
+    for b in cfg.get("boards", []):
+        base, site = b["base"].rstrip("/"), b.get("site", "CX_1")
+        seen = set()
+        for q in b.get("queries") or ORC_QUERIES:
+            for page in range(int(cfg.get("pages", 2))):
+                finder = (f'findReqs;siteNumber={site},facetsList=LOCATIONS,limit=25,offset={page * 25},'
+                          f'keyword="{q}",sortBy=POSTING_DATES_DESC')
+                url = (f"{base}/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true"
+                       f"&expand=requisitionList.secondaryLocations&finder={quote(finder, safe='=;,')}")
+                status, data = http_json(url)
+                if status != 200 or not data or not data.get("items"):
+                    if status not in (200, 0):
+                        log(f"Oracle {b['company']}: HTTP {status}")
+                    break
+                item = data["items"][0]
+                reqs = item.get("requisitionList") or []
+                for r in reqs:
+                    rid = str(r.get("Id") or "")
+                    if not rid or rid in seen:
+                        continue
+                    seen.add(rid)
+                    loc = r.get("PrimaryLocation") or ""
+                    country = guess_country(f"{loc}, {r.get('PrimaryLocationCountry') or ''}")
+                    if country and country not in countries(profile):
+                        continue
+                    out.append(job(r.get("Title"), b["company"], loc, f"{base}/hcmUI/CandidateExperience/en/sites/{site}/job/{rid}",
+                                   r.get("ShortDescriptionStr") or "", "Career site", country, (r.get("PostedDate") or "")[:10]))
+                if len(reqs) < 25 or (page + 1) * 25 >= int(item.get("TotalJobsCount") or 0):
+                    break
+                time.sleep(0.6)
+        log(f"Oracle {b['company']}: {len(seen)} listings")
+    return out
+
+
+def enrich_oracle(j: dict) -> None:
+    m = re.match(r"(https://[^/]+)/hcmUI/CandidateExperience/en/sites/([^/]+)/job/(\d+)", j["url"])
+    if not m:
+        return
+    base, site, rid = m.groups()
+    finder = quote(f'ById;Id="{rid}",siteNumber={site}', safe="=;,")
+    status, data = http_json(f"{base}/hcmRestApi/resources/latest/recruitingCEJobRequisitionDetails?expand=all&onlyData=true&finder={finder}")
+    if status == 200 and data and data.get("items"):
+        it = data["items"][0]
+        j["description"] = clean(" ".join(str(it.get(k) or "") for k in ("ExternalDescriptionStr", "ExternalResponsibilitiesStr", "ExternalQualificationsStr")))[:6000]
+
+
 ENRICHERS = {"Workday": enrich_workday, "SuccessFactors": enrich_successfactors, "Workable": enrich_workable,
-             "LinkedIn": enrich_linkedin, "Rigzone": enrich_rigzone}
+             "LinkedIn": enrich_linkedin, "Rigzone": enrich_rigzone, "Career site": lambda j: enrich_career(j)}
+
+
+def enrich_career(j: dict) -> None:
+    """Employer career sites: pick the reader from the link."""
+    u = j["url"]
+    if ".myworkdayjobs.com/" in u:
+        enrich_workday(j)
+    elif "/hcmUI/CandidateExperience/" in u:
+        enrich_oracle(j)
+    elif "apply.workable.com/" in u:
+        enrich_workable(j)
+    else:
+        enrich_successfactors(j)
 
 
 def enrich(j: dict) -> None:
@@ -593,6 +659,7 @@ def fetch_all(sources: dict, profile: dict) -> list[dict]:
         ("newspapers", fetch_wordpress), ("successfactors", fetch_successfactors), ("workable", fetch_workable),
         ("jooble", fetch_jooble), ("gulftalent", fetch_gulftalent), ("google_alerts_rss", fetch_rss),
         ("greenhouse", fetch_greenhouse), ("lever", fetch_lever), ("smartrecruiters", fetch_smartrecruiters),
+        ("oracle", fetch_oracle),
     ]
 
     def run(item):

@@ -120,6 +120,17 @@
     "max_posting_age_days": 45,
     "no_listing_bonus_sources": [
       "SEEK"
+    ],
+    "queries_entry": [
+      "fresh graduate engineer",
+      "trainee engineer",
+      "junior site engineer",
+      "civil technician",
+      "civil supervisor",
+      "civil foreman",
+      "QA/QC inspector civil",
+      "civil draftsman",
+      "assistant quantity surveyor"
     ]
   },
   "target_titles": [
@@ -220,7 +231,14 @@
     "data infrastructure": -80,
     "database": -70,
     "process engineer": -35,
-    "_comment": "Whole-word matches in the job title. Skipped when the word is part of the matched target title, or when title_penalty_exempt says so."
+    "_comment": "Whole-word matches in the job title. Skipped when the word is part of the matched target title, or when title_penalty_exempt says so.",
+    "p.eng": -45,
+    "peng": -45,
+    "p. eng": -45,
+    "rpeq": -45,
+    "cpeng": -45,
+    "registered professional engineer": -45,
+    "professional engineer": -30
   },
   "keyword_points": {
     "water network": 12,
@@ -752,6 +770,112 @@
         "entry level": 4
       },
       "requires_sector": "oil_gas"
+    },
+    "site_support": {
+      "label": "Site support (technician / inspector / supervisor)",
+      "_comment": "Roles below an engineer's level that a civil engineer can take as a way in: technician, inspector, supervisor, foreman, draftsman.",
+      "target_titles": [
+        "civil technician",
+        "site technician",
+        "construction technician",
+        "lab technician",
+        "materials technician",
+        "cad technician",
+        "civil supervisor",
+        "site supervisor",
+        "construction supervisor",
+        "works supervisor",
+        "water network supervisor",
+        "pipeline supervisor",
+        "utilities supervisor",
+        "maintenance supervisor",
+        "civil foreman",
+        "site foreman",
+        "general foreman",
+        "pipe foreman",
+        "civil inspector",
+        "site inspector",
+        "qa/qc inspector",
+        "qc inspector",
+        "quality inspector",
+        "construction inspector",
+        "inspector civil",
+        "autocad draftsman",
+        "civil draftsman",
+        "autocad draughtsman",
+        "civil draughtsman",
+        "draftsman",
+        "draughtsman",
+        "assistant quantity surveyor",
+        "junior quantity surveyor",
+        "assistant site engineer",
+        "assistant engineer",
+        "technical assistant",
+        "site coordinator"
+      ],
+      "keyword_points": {
+        "civil": 6,
+        "construction": 4,
+        "site": 3,
+        "water": 4,
+        "pipeline": 4,
+        "road": 4,
+        "roads": 4,
+        "asphalt": 3,
+        "concrete": 3,
+        "excavation": 4,
+        "inspection": 4,
+        "qa/qc": 5,
+        "autocad": 5,
+        "civil 3d": 4,
+        "boq": 4,
+        "quantities": 3,
+        "hse": 2,
+        "nebosh": 4,
+        "maintenance": 3,
+        "utility": 4,
+        "utilities": 4,
+        "drawings": 3,
+        "survey": 2,
+        "degree": 3,
+        "diploma": 2
+      },
+      "require_any": [
+        "construction",
+        "contracting",
+        "contractor",
+        "civil",
+        "infrastructure",
+        "utility",
+        "utilities",
+        "water",
+        "power",
+        "energy",
+        "oil",
+        "gas",
+        "petrochemical",
+        "refinery",
+        "plant",
+        "industrial",
+        "manufacturing",
+        "engineering",
+        "epc",
+        "project",
+        "projects",
+        "site",
+        "sites",
+        "maintenance",
+        "facilities",
+        "facility management",
+        "mining",
+        "marine",
+        "port",
+        "airport",
+        "rail",
+        "roads",
+        "fleet",
+        "heavy equipment"
+      ]
     }
   },
   "_fresher_note": "Fresher/graduate/junior roles are accepted for civil and oil & gas; only unpaid internships keep a small penalty.",
@@ -859,7 +983,8 @@
         "\\bpr\\s+holders?\\b"
       ],
       "penalty": [
-        "\\bright to work in australia\\b|\\bwork(?:ing)? rights\\b|\\bno (?:visa )?sponsorship\\b|\\bunable to sponsor\\b|\\bnot (?:able|offering) to sponsor\\b"
+        "\\bright to work in australia\\b|\\bwork(?:ing)? rights\\b|\\bno (?:visa )?sponsorship\\b|\\bunable to sponsor\\b|\\bnot (?:able|offering) to sponsor\\b",
+        "\\b(?:rpeq|cpeng)\\b(?![^.;\\n]{0,40}\\b(?:eligib\\w*|working towards))"
       ]
     },
     "Canada": {
@@ -869,10 +994,20 @@
         "\\bmust be (?:a )?canadian citizen\\b"
       ],
       "penalty": [
-        "\\b(?:legally )?(?:eligible|entitled|authori[sz]ed) to work in canada\\b|\\bno (?:visa )?sponsorship\\b|\\bunable to sponsor\\b|\\bnot (?:able|offering) to sponsor\\b"
+        "\\b(?:legally )?(?:eligible|entitled|authori[sz]ed) to work in canada\\b|\\bno (?:visa )?sponsorship\\b|\\bunable to sponsor\\b|\\bnot (?:able|offering) to sponsor\\b",
+        "\\bp\\.?\\s?eng\\.?\\b(?![^.;\\n]{0,50}\\b(?:eligib\\w*|eit|in training|working towards|or equivalent))"
       ]
     }
   },
-  "_rules_version": 4,
-  "_rules_comment": "Rule lists (rejects, penalties, sectors, work rights, screening answers, category rules) are maintained by the program and refreshed when it updates. Your facts, countries, queries and minimum scores are yours."
+  "_rules_version": 6,
+  "_rules_comment": "Rule lists (rejects, penalties, sectors, work rights, screening answers, category rules) are maintained by the program and refreshed when it updates. Your facts, countries, queries and minimum scores are yours.",
+  "ai_facts": {
+    "work_status": "GCC national (Bahraini): does not need visa sponsorship to work in other GCC countries; would need employer visa sponsorship for Canada or Australia and does not hold their citizenship or permanent residence."
+  },
+  "levels": {
+    "_comment": "Shown as a tag and filter on every job.",
+    "senior": "\\b(senior|sr\\.?|lead|principal|manager|head|director|chief|superintendent)\\b",
+    "starter": "\\b(fresh(er)?|graduate|trainee|junior|jr\\.?|intern(ship)?|entry[- ]level|apprentice|0\\s*(-|to)\\s*[12]\\s*(years|yrs))\\b",
+    "support": "\\b(technician|inspector|supervisor|foreman|draftsman|draughtsman|operator|assistant|coordinator)\\b"
+  }
 }

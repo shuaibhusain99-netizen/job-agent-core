@@ -311,6 +311,9 @@ def draft_email(row: dict) -> dict:
         if m:
             body = m.group(1).strip()
             body = re.sub(r"^\d{1,2} \w+ \d{4}\n+", "", body)   # the letter's date line is odd in an e-mail
+    ai_letter = _details().load(row.get("url", "")).get("letter_ai", "")
+    if ai_letter:
+        body = ai_letter
     if not body:
         body = (f"Dear Hiring Manager,\n\nI would like to apply for the {row['title']} position"
                 f"{' with ' + row['company'] if row.get('company') and row['company'] not in ('Unknown', 'Gulf Job Paper') else ''}. "
@@ -426,6 +429,25 @@ def apply_edits(edits: dict) -> dict:
     return {"ok": True, "changed": n}
 
 
+def _details():
+    from agent import details
+    details.ROOT = DATA / "details"
+    return details
+
+
+def _keys() -> dict:
+    try:
+        return json.loads((DATA / "keys.json").read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _ai_usage() -> int:
+    from agent import ai
+    ai.USAGE = DATA / "ai_usage.json"
+    return ai._usage()
+
+
 # ----------------------------------------------------------------------------- HTTP
 MAX_BODY = 25 * 1024 * 1024          # the CV upload is the biggest request
 
@@ -539,6 +561,23 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(mail_public())
         if u.path == "/api/apply-status":
             return self._json({u_: {"stopped": s_.stop, "done": s_.done, "log": s_.log[-5:]} for u_, s_ in APPLY.items()})
+        if u.path == "/api/job":
+            url = q.get("url", [""])[0]
+            row = next((r for r in tracker_rows() if r.get("url") == url), None)
+            if not row:
+                return self._json({"error": "job not in tracker"}, 404)
+            d = _details().load(url)
+            pack = _pack_path(row.get("pack_file", ""))
+            return self._json({"description": d.get("description", ""), "ai": d.get("ai") or {}, "letter_ai": d.get("letter_ai", ""),
+                               "posted": d.get("posted") or row.get("posted", ""),
+                               "pack": pack.read_text(encoding="utf-8") if pack else ""})
+        if u.path == "/api/ai":
+            from agent import ai
+            k = _keys()
+            a = dict(k.get("ai") or {})
+            if a.get("api_key"):
+                a["api_key"] = "••••" + a["api_key"][-4:]
+            return self._json({"settings": a, "active": bool(ai.settings(k)), "used_today": _ai_usage()})
         if u.path == "/api/draft":
             url = q.get("url", [""])[0]
             row = next((r for r in tracker_rows() if r.get("url") == url), None)
@@ -615,6 +654,43 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(apply_on_site(str(d["url"])))
             except Exception as e:
                 return self._json({"ok": False, "error": f"{type(e).__name__}: {e}"})
+        if u.path == "/api/ai":
+            from agent import ai
+            k = _keys()
+            a = k.setdefault("ai", {})
+            for f in ("enabled", "provider", "model", "base_url", "max_per_run"):
+                if f in d:
+                    a[f] = d[f]
+            if d.get("api_key"):
+                a["api_key"] = str(d["api_key"]).strip()
+            if a.get("provider") and a["provider"] not in ai.PROVIDERS:
+                return self._json({"ok": False, "error": "unknown provider"}, 400)
+            tracker.atomic_write(DATA / "keys.json", json.dumps(k, indent=2))
+            return self._json({"ok": True})
+        if u.path == "/api/ai-test":
+            from agent import ai
+            s_ = ai.settings(_keys())
+            if not s_:
+                return self._json({"ok": False, "message": "Turn the AI reviewer on and fill in the provider (and key for Groq) first."})
+            try:
+                return self._json({"ok": ai.test(s_) == "ok", "message": f"Connected to {s_['provider']} - model {s_['model']} answered."})
+            except Exception as e:
+                return self._json({"ok": False, "message": str(e)[:300]})
+        if u.path == "/api/ai-letter":
+            from agent import ai
+            s_ = ai.settings(_keys())
+            if not s_:
+                return self._json({"ok": False, "error": "The AI reviewer is off - set it up in Settings."})
+            url = str(d.get("url", ""))
+            row = next((r for r in tracker_rows() if r.get("url") == url), None)
+            det = _details().load(url)
+            if not row or len(det.get("description", "")) < 150:
+                return self._json({"ok": False, "error": "No ad text saved for this job yet - run a search first."})
+            job = dict(row, description=det["description"])
+            profile = json.loads((DATA / "profile.json").read_text(encoding="utf-8"))
+            text = ai.letter(job, profile, s_)
+            _details().save(url, {"letter_ai": text})
+            return self._json({"ok": True, "letter": text})
         if u.path == "/api/open-folder":
             try:
                 if os.name == "nt": os.startfile(DATA)  # type: ignore[attr-defined]
