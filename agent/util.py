@@ -214,6 +214,16 @@ def country_weight(profile: dict, name: str):
     return cfg.get("weight", 1.0) if isinstance(cfg, dict) else float(cfg)
 
 
+# Incremental searching (set by main): only ads posted in the last WINDOW_DAYS days are asked for (None = each source's
+# own default, i.e. a full search), and KNOWN holds the jobs already in your list so paging can stop when nothing is new.
+WINDOW_DAYS: int | None = None
+KNOWN: set[str] = set()
+
+
+def window(default: int) -> int:
+    return max(1, min(default, WINDOW_DAYS)) if WINDOW_DAYS else default
+
+
 def dedupe_key(j: dict) -> str:
     u = j["url"].lower().split("?")[0].split("#")[0].rstrip("/")
     m = re.search(r"linkedin\.com/jobs/view/(?:[^/]*-)?(\d{6,})", u)

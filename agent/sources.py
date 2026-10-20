@@ -5,7 +5,8 @@ from urllib.parse import quote, quote_plus, urljoin
 from xml.etree import ElementTree as ET
 
 from pathlib import Path
-from .util import http, http_json, job, clean, log, guess_country, countries
+from .util import http, http_json, job, clean, log, guess_country, countries, window, dedupe_key
+from . import util
 from . import sitebrowse
 
 
@@ -131,51 +132,85 @@ def fetch_gulftalent(cfg: dict, profile: dict) -> list[dict]:
 
 
 # ---------------------------------------------------------------- LinkedIn guest listing (best effort)
+def _or(qs: list[str]) -> str:
+    return " OR ".join(f'"{q}"' if " " in q else q for q in qs)
+
+
+def linkedin_groups(profile: dict, cfg: dict) -> list[tuple[str, int]]:
+    """Your search phrases joined with OR, a few searches instead of ~40: each job comes back once instead of once per
+    phrase, so far fewer requests reach much deeper into the results. (keywords, page limit)"""
+    sp = profile["search"]
+    seen, groups = set(), []
+
+    def add(qs, pages):
+        qs = [q for q in qs if q.lower() not in seen and not seen.add(q.lower())]
+        for i in range(0, len(qs), 10):                     # keep each search a sensible length
+            groups.append((_or(qs[i:i + 10]), pages))
+    add(sp["queries"] + sp.get("queries_entry", []), int(cfg.get("pages_civil", 25)))
+    add(sp.get("queries_other", []), int(cfg.get("pages_other", 10)))
+    add(sp.get("queries_oilgas", []), int(cfg.get("pages_other", 10)))
+    return groups
+
+
 def fetch_linkedin(cfg: dict, profile: dict) -> list[dict]:
     if not cfg.get("enabled"):
         return []
     out, blocked_countries = [], 0
-    pages = int(cfg.get("pages", 3))
-    tpr = f"r{int(cfg.get('days', 7)) * 86400}"
+    days = window(int(cfg.get("days", 14)))
+    tpr = f"r{days * 86400}"
+    groups = linkedin_groups(profile, cfg)
+    requests = 0
     for country in countries(profile):
-        country_hits, challenged = 0, 0
-        civil_q = {x.lower() for x in profile["search"]["queries"]}
-        for q in all_queries(profile):
-            start = 0
-            for page in range(pages if q.lower() in civil_q else 1):
+        country_hits, challenged, seen = 0, 0, set()
+        for kw, max_pages in groups:
+            start, stale = 0, 0
+            for page in range(max_pages):
                 url = ("https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?"
-                       f"keywords={quote_plus(q)}&location={quote_plus(country)}&f_TPR={tpr}&start={start}")
+                       f"keywords={quote_plus(kw)}&location={quote_plus(country)}&f_TPR={tpr}&start={start}")
                 status, body = http(url)
+                requests += 1
                 if status == 200 and "base-card" not in body:
-                    break                                   # no (more) results for this query
+                    break                                   # no (more) results
                 if status != 200:
                     challenged += 1
                     time.sleep(3)
                     break
                 cards = re.findall(r"<li>[\s\S]*?</li>", body)
+                new = unknown = 0
                 for card in cards:
                     t = re.search(r'base-search-card__title">\s*([^<]+)', card)
                     c = re.search(r'class="hidden-nested-link"[^>]*>\s*([^<]+)', card)
                     l = re.search(r'job-search-card__location">\s*([^<]+)', card)
                     u = re.search(r'href="(https://[^"?]+)', card)
                     d = re.search(r'datetime="([^"]+)"', card)
-                    if t and u:
-                        loc = l.group(1) if l else country
-                        out.append(job(t.group(1), c.group(1) if c else "", loc,
-                                       u.group(1), "", "LinkedIn", guess_country(clean(loc)) or country, d.group(1)[:10] if d else ""))
-                        country_hits += 1
-                time.sleep(1.2)
-                if not cards:
-                    break
+                    if not (t and u):
+                        continue
+                    loc = l.group(1) if l else country
+                    j = job(t.group(1), c.group(1) if c else "", loc, u.group(1), "", "LinkedIn",
+                            guess_country(clean(loc)) or country, d.group(1)[:10] if d else "")
+                    k = dedupe_key(j)
+                    if k in seen:
+                        continue
+                    seen.add(k)
+                    new += 1
+                    unknown += k not in util.KNOWN
+                    out.append(j)
+                    country_hits += 1
+                time.sleep(1.0)
+                if not cards or not new:
+                    break                                   # the results started repeating
+                stale = stale + 1 if not unknown else 0
+                if stale >= 2:
+                    break                                   # two pages of jobs you already have: the rest is older news
                 start += len(cards)
             if challenged >= 3:
                 break
-        log(f"LinkedIn {country}: {country_hits} rows" + (" (stopped: LinkedIn is limiting requests)" if challenged >= 3 else ""))
+        log(f"LinkedIn {country}: {country_hits} jobs" + (" (stopped: LinkedIn is limiting requests)" if challenged >= 3 else ""))
         blocked_countries = blocked_countries + 1 if challenged >= 3 else 0
         if blocked_countries >= 2:
             log("LinkedIn: limited in two countries in a row - trying again next run")
             break
-    log(f"LinkedIn: {len(out)} rows total")
+    log(f"LinkedIn: {len(out)} jobs from {requests} requests (posted in the last {days} days)")
     return out
 
 
@@ -196,7 +231,7 @@ def enrich_linkedin(j: dict) -> None:
         t = re.search(r"<title>([^|<]+?)\s+hiring\s", body)
         if t:
             j["company"] = clean(t.group(1))
-    time.sleep(1.2)
+    time.sleep(0.8)
 
 
 # ---------------------------------------------------------------- SEEK (Australia, public API)
@@ -207,7 +242,7 @@ def fetch_seek(cfg: dict, profile: dict) -> list[dict]:
     for q in cfg.get("queries", ["civil engineer"]) + profile["search"].get("queries_other", []) + profile["search"].get("queries_oilgas", []):
         for page in range(1, int(cfg.get("pages", 2)) + 1):
             url = ("https://www.seek.com.au/api/jobsearch/v5/search?siteKey=AU-Main&sourcesystem=houston"
-                   f"&keywords={quote_plus(q)}&page={page}&pageSize=50&locale=en-AU&sortmode=ListedDate")
+                   f"&keywords={quote_plus(q)}&page={page}&pageSize=50&locale=en-AU&sortmode=ListedDate&daterange={window(31)}")
             status, data = http_json(url)
             if status != 200 or not data:
                 log(f"SEEK: HTTP {status} on '{q}' p{page}")

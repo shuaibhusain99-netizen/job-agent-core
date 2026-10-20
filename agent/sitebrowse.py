@@ -14,7 +14,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from urllib.parse import quote_plus
 
-from .util import job, clean, log, guess_country, countries
+from .util import job, clean, log, guess_country, countries, window
 
 PROFILE_DIR = Path("browser-search")          # set by main to <data>/browser-search
 
@@ -109,7 +109,7 @@ CHALLENGE_JS = r"""(() => /just a moment|security check|attention required|verif
 SITES = {
     "indeed": {"name": "Indeed", "js": INDEED_JS, "detail": False,           # Indeed asks for a human check on job pages
                "where": lambda c: INDEED_HOST.get(c),
-               "url": lambda w, q, p: f"https://{w}/jobs?q={quote_plus(q)}&sort=date&fromage=21" + (f"&start={p * 10}" if p else "")},
+               "url": lambda w, q, p: f"https://{w}/jobs?q={quote_plus(q)}&sort=date&fromage={window(21)}" + (f"&start={p * 10}" if p else "")},
     "bayt": {"name": "Bayt", "js": BAYT_JS, "detail": True, "where": lambda c: GULF_SLUG.get(c),
              "url": lambda w, q, p: f"https://www.bayt.com/en/{w}/jobs/{_slug(q)}-jobs/" + (f"?page={p + 1}" if p else "")},
     "naukrigulf": {"name": "NaukriGulf", "js": NAUKRI_JS, "detail": True, "where": lambda c: GULF_SLUG.get(c),

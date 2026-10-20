@@ -128,7 +128,7 @@ def _claim_run() -> bool:
     return True
 
 
-def run_agent(block: bool = False) -> bool:
+def run_agent(block: bool = False, full: bool = False) -> bool:
     if STATE["running"] or not _claim_run():
         STATE["log"].append("A search is already running (in the app or the daily task).")
         return False
@@ -157,7 +157,7 @@ def run_agent(block: bool = False) -> bool:
             agent_main.PACKS = DATA / "applications"
             import agent.sources as srcmod
             srcmod.KEYS_PATH = DATA / "keys.json"
-            sys.argv = ["main.py"]
+            sys.argv = ["main.py"] + (["--full"] if full else [])
             agent_main.main()
         except BaseException as e:  # noqa - a broken settings file or anything else must not leave the app stuck "running"
             STATE["log"].append(f"ERROR: {type(e).__name__}: {e}")
@@ -611,7 +611,7 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/edits":
             return self._json(apply_edits(d.get("edits", {})))
         if u.path == "/api/run":
-            started = run_agent()
+            started = run_agent(full=bool(d.get("full")))
             return self._json({"ok": started, "error": "" if started else "A search is already running."})
         if u.path == "/api/schedule":
             hour = int(d.get("hour", 7))

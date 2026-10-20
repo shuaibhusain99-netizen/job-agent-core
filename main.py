@@ -16,6 +16,7 @@ from agent.score import score
 from agent.tailor import application_pack
 from agent import tracker, ai, details
 from agent.util import dedupe_key, log, countries
+from agent import util
 
 ROOT = Path(__file__).resolve().parent
 PROFILE = json.loads((ROOT / "profile.json").read_text(encoding="utf-8"))
@@ -36,6 +37,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry", action="store_true", help="don't write tracker/sheet")
     ap.add_argument("--max-enrich", type=int, default=300, help="how many jobs get their full ad fetched (best first)")
+    ap.add_argument("--full", action="store_true", help="search the full period, not only what's new since the last search")
     args = ap.parse_args()
     REPORTS.mkdir(exist_ok=True)
     PACKS.mkdir(exist_ok=True)
@@ -43,23 +45,37 @@ def main() -> int:
         print("Agent is paused (profile.json search.paused = true). Nothing to do.")
         return 0
 
-    # 1. search
+    # 1. search - only what's new since the last search, with a full search every few days
+    known = tracker.load(TRACKER)
+    util.KNOWN = {dedupe_key(r) for r in known.values()}
+    full, sig = plan_search(args.full)
+    log("Full search (all recent ads)" if not util.WINDOW_DAYS else
+        f"Quick search: ads from the last {util.WINDOW_DAYS} days (a full search runs every {full_every()} days)")
     raw = fetch_all(SOURCES, PROFILE)
     unique: dict[str, dict] = {}
-    seen_tcc: set[str] = set()
+    by_tcc: dict[str, str] = {}
     for j in raw:
         k = dedupe_key(j)
-        # the same title at the same company in the same country is one job, wherever it was found
+        if not k:
+            continue
+        # the same title at the same company in the same country is one job, wherever it was found:
+        # keep the first one seen, but take the fuller ad text from the copy that has it (no need to fetch it again)
         tcc = "|".join([j["title"].lower().strip(), j["company"].lower().strip(), j.get("country") or j["location"].lower()]) \
             if j["company"] != "Unknown" else ""
-        if k and k not in unique and (not tcc or tcc not in seen_tcc):
+        first = unique.get(k) or (unique.get(by_tcc[tcc]) if tcc in by_tcc else None)
+        if first is None:
             unique[k] = j
             if tcc:
-                seen_tcc.add(tcc)
+                by_tcc[tcc] = k
+        else:
+            if len(j.get("description", "")) > len(first.get("description", "")) and not j.get("_snippet"):
+                first["description"] = j["description"]
+                first.pop("_snippet", None)
+            if not first.get("posted") and j.get("posted"):
+                first["posted"] = j["posted"]
     log(f"Collected {len(raw)} rows, {len(unique)} unique")
 
     # 2. the job list as it stands (by the same keys, so a LinkedIn job seen on another subdomain is still "known")
-    known = tracker.load(TRACKER)
     tracker.backfill_from_notes(known)
     n = tracker.retag_old_rows(known, PROFILE)
     if n:
@@ -177,8 +193,56 @@ def main() -> int:
         print("\n(dry run: job list not updated)")
         return 0
     tracker.save(TRACKER, known)
+    save_state(full, sig)
     details.prune(tracker.load(TRACKER).keys())
     return 0
+
+
+# ----------------------------------------------------------------------------- quick vs full search
+def full_every() -> int:
+    return int(PROFILE["search"].get("full_search_days", 7))
+
+
+def _search_sig() -> str:
+    """Changes when you change what is searched (phrases or countries): the next search is then a full one."""
+    sp = PROFILE["search"]
+    parts = [sp.get(k) for k in ("queries", "queries_other", "queries_oilgas", "queries_entry")] + [countries(PROFILE)]
+    return hashlib.sha1(json.dumps(parts, sort_keys=True).encode()).hexdigest()[:12]
+
+
+def _state() -> dict:
+    try:
+        return json.loads((ROOT / "state.json").read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def plan_search(force_full: bool = False) -> tuple[bool, str]:
+    """Quick search when the last search finished recently and nothing about the search changed: ask the sites only for
+    ads posted since then (+2 days margin). Otherwise, and every full_search_days, a full search."""
+    st, sig, today = _state(), _search_sig(), date.today()
+
+    def day(k):
+        try:
+            return date.fromisoformat(st.get(k, ""))
+        except ValueError:
+            return None
+    last_ok, last_full = day("last_ok"), day("last_full")
+    full = (force_full or not last_ok or not last_full or st.get("sig") != sig
+            or (today - last_full).days >= full_every() or (today - last_ok).days > 10)
+    util.WINDOW_DAYS = None if full else max(2, (today - last_ok).days + 2)
+    return full, sig
+
+
+def save_state(full: bool, sig: str) -> None:
+    st = _state()
+    st.update(last_ok=date.today().isoformat(), sig=sig)
+    if full:
+        st["last_full"] = date.today().isoformat()
+    try:
+        tracker.atomic_write(ROOT / "state.json", json.dumps(st, indent=1))
+    except OSError:
+        pass
 
 
 def drop_pack(row: dict) -> None:
