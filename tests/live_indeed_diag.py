@@ -22,11 +22,12 @@ JS = r"""(() => {
 sitebrowse.PROFILE_DIR = Path(tempfile.mkdtemp(prefix="jobagent-diag-")) / "browser-search"
 sess = sitebrowse._session({"show_window": False})
 urls = {
-    "or-21d": "https://sa.indeed.com/jobs?q=" + quote_plus('"civil engineer" OR "site engineer"') + "&sort=date&fromage=21",
-    "plain-21d": "https://sa.indeed.com/jobs?q=" + quote_plus("civil engineer") + "&sort=date&fromage=21",
-    "plain-any": "https://sa.indeed.com/jobs?q=" + quote_plus("civil engineer") + "&sort=date",
-    "or-noquote": "https://sa.indeed.com/jobs?q=" + quote_plus("civil engineer OR site engineer") + "&sort=date&fromage=21",
-    "ae-plain": "https://ae.indeed.com/jobs?q=" + quote_plus("civil engineer") + "&sort=date&fromage=21",
+    "paren-or": "https://sa.indeed.com/jobs?q=" + quote_plus('("civil engineer" OR "site engineer")') + "&sort=date&fromage=21",
+    "paren-or3": "https://sa.indeed.com/jobs?q=" + quote_plus('("civil engineer" OR "site engineer" OR "project engineer" OR "quantity surveyor")') + "&sort=date&fromage=21",
+    "site-plain": "https://sa.indeed.com/jobs?q=" + quote_plus("site engineer") + "&sort=date&fromage=21",
+    "qs-plain": "https://sa.indeed.com/jobs?q=" + quote_plus("quantity surveyor") + "&sort=date&fromage=21",
+    "civil-p2": "https://sa.indeed.com/jobs?q=" + quote_plus("civil engineer") + "&sort=date&fromage=21&start=10",
+    "ca-plain": "https://ca.indeed.com/jobs?q=" + quote_plus("civil engineer") + "&sort=date&fromage=7",
 }
 try:
     sess.start()
