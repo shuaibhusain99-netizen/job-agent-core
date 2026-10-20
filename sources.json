@@ -38,9 +38,9 @@
     "_comment": "LinkedIn public listings. Your search phrases are joined with OR into a few searches; at most max_requests per search, a random 1-2 s pause, and a full stop if LinkedIn asks to slow down.",
     "enabled": true,
     "days": 14,
-    "pages_civil": 15,
-    "pages_other": 6,
-    "max_requests": 220
+    "pages_civil": 10,
+    "pages_other": 4,
+    "max_requests": 160
   },
   "workday": {
     "_comment": "Employer career sites on Workday. Each employer's own country filter is found automatically. tenant / host / site from the careers URL: https://<tenant>.<host>.myworkdayjobs.com/<site>",
@@ -270,7 +270,7 @@
       }
     ]
   },
-  "_version": 6,
+  "_version": 7,
   "oracle": {
     "_comment": "Oracle Recruiting Cloud career sites (public JSON).",
     "pages": 2,

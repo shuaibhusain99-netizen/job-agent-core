@@ -818,6 +818,9 @@ def fetch_rigzone(cfg: dict, profile: dict) -> list[dict]:
                                     headers={"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"})
                 if status != 200 or not body:
                     log(f"Rigzone: HTTP {status} on '{q}' {country}")
+                    if status in (0, 202, 403, 429) or status >= 500:      # 202 = a bot check: the rest would fail too
+                        log("Rigzone: the site is checking for bots - stopped for this search")
+                        return out
                     break
                 try:
                     data = json.loads(body)
