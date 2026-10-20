@@ -224,7 +224,15 @@ def window(default: int) -> int:
     return max(1, min(default, WINDOW_DAYS)) if WINDOW_DAYS else default
 
 
+ID_PARAMS = re.compile(r"(?:^|[?&])(jk|vjk|jobid|job_id|gh_jid)=([^&#]+)", re.I)
+
+
 def dedupe_key(j: dict) -> str:
+    m = ID_PARAMS.search(j["url"])
+    if m and "indeed." in j["url"].lower():
+        return "indeed:" + m.group(2).lower()        # Indeed: the job id is in ?jk=, the same on every country site
+    if m:
+        return j["url"].lower().split("?")[0].rstrip("/") + f"?{m.group(1).lower()}={m.group(2).lower()}"
     u = j["url"].lower().split("?")[0].split("#")[0].rstrip("/")
     m = re.search(r"linkedin\.com/jobs/view/(?:[^/]*-)?(\d{6,})", u)
     if m:

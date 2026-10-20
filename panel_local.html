@@ -267,7 +267,7 @@ section.settings{overflow:auto;padding:22px 26px 60px}
         </div>
         <div class="card">
           <h3>Daily search</h3>
-          <p class="hint">Each search asks the sites only for ads posted since the last search, so a daily search takes a few minutes. Once a week, or after you change what to search, it does a full search of all recent ads (about 25 minutes). The daily search runs at 07:00 if this computer is on.</p>
+          <p class="hint">Each search asks the sites only for ads posted since the last search, so a daily search takes a few minutes. Once a week, or after you change what to search, it does a full search of all recent ads (about 15 minutes). The daily search runs at 07:00 if this computer is on.</p>
           <div class="inline"><button id="schedBtn">Daily search: …</button><button id="runFull">Run a full search now</button><button id="openFolder">Open data folder</button></div>
           <p class="small faint" id="dataDir"></p>
           <div class="runs" id="runs"></div>
@@ -374,7 +374,7 @@ section.settings{overflow:auto;padding:22px 26px 60px}
       else pollT=setTimeout(loadStatus,30000);
     }catch(e){ setState("off","Can't reach the app - start JobAgent again"); }
   }
-  async function startSearch(full){ try{ const r=await api("/api/run",{full:!!full}); if(r.ok){ toast(full?"Full search started - about 25 minutes":"Search started - it gets only what's new since the last search"); setTimeout(loadStatus,800); } else toast(r.error||"Couldn't start the search"); }catch(e){ toast("Couldn't start the search: "+e.message); } }
+  async function startSearch(full){ try{ const r=await api("/api/run",{full:!!full}); if(r.ok){ toast(full?"Full search started - about 15 minutes":"Search started - it gets only what's new since the last search"); setTimeout(loadStatus,800); } else toast(r.error||"Couldn't start the search"); }catch(e){ toast("Couldn't start the search: "+e.message); } }
   $("runNow").addEventListener("click",()=>startSearch(false));
   $("runFull").addEventListener("click",()=>startSearch(true));
 

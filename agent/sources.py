@@ -499,7 +499,8 @@ EMPLOYER_QUERIES = ["civil", "site engineer", "QA/QC", "planning engineer", "qua
 
 
 def fetch_smartrecruiters(cfg: dict, profile: dict) -> list[dict]:
-    """SmartRecruiters public API, filtered by country on the server (Egis, Masdar, SGS, Turner & Townsend, Ramboll ...)."""
+    """SmartRecruiters public API: every posting of the company in each country (a few pages of 100), not one search per
+    phrase - the scoring decides what's relevant. (Egis, Masdar, SGS, Turner & Townsend, Ramboll ...)"""
     out = []
     for c in cfg.get("companies", []):
         cid, name = (c, c) if isinstance(c, str) else (c["id"], c.get("company", c["id"]))
@@ -508,11 +509,13 @@ def fetch_smartrecruiters(cfg: dict, profile: dict) -> list[dict]:
             cc = SR_CC.get(country)
             if not cc:
                 continue
-            for q in cfg.get("queries") or EMPLOYER_QUERIES:
-                status, data = http_json(f"https://api.smartrecruiters.com/v1/companies/{quote(cid)}/postings?limit=100&q={quote_plus(q)}&country={cc}")
+            q = f"&q={quote_plus(cfg['queries'][0])}" if cfg.get("queries") else ""      # (tests)
+            for offset in range(0, int(cfg.get("max_per_country", 400)), 100):
+                status, data = http_json(f"https://api.smartrecruiters.com/v1/companies/{quote(cid)}/postings?limit=100&offset={offset}&country={cc}{q}")
                 if status != 200 or not data:
                     break
-                for it in data.get("content", []):
+                rows = data.get("content", [])
+                for it in rows:
                     if it.get("id") in seen:
                         continue
                     seen.add(it.get("id"))
@@ -520,6 +523,8 @@ def fetch_smartrecruiters(cfg: dict, profile: dict) -> list[dict]:
                     loc_txt = ", ".join(x for x in [loc.get("city"), country] if x)
                     out.append(job(it.get("name"), name, loc_txt, f"https://jobs.smartrecruiters.com/{cid}/{it.get('id')}", "",
                                    "Career site", country, (it.get("releasedDate") or "")[:10]))
+                if len(rows) < 100 or offset + 100 >= int(data.get("totalFound") or 0):
+                    break
                 time.sleep(0.3)
         log(f"SmartRecruiters {name}: {len(seen)} listings")
     return out

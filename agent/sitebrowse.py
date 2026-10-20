@@ -14,7 +14,8 @@ from datetime import date, timedelta
 from pathlib import Path
 from urllib.parse import quote_plus
 
-from .util import job, clean, log, guess_country, countries, window
+from .util import job, clean, log, guess_country, countries, window, dedupe_key
+from . import util
 
 PROFILE_DIR = Path("browser-search")          # set by main to <data>/browser-search
 
@@ -107,7 +108,7 @@ CHALLENGE_JS = r"""(() => /just a moment|security check|attention required|verif
 
 
 SITES = {
-    "indeed": {"name": "Indeed", "js": INDEED_JS, "detail": False,           # Indeed asks for a human check on job pages
+    "indeed": {"name": "Indeed", "js": INDEED_JS, "detail": False, "group": True,  # human check on job pages; OR searches work
                "where": lambda c: INDEED_HOST.get(c),
                "url": lambda w, q, p: f"https://{w}/jobs?q={quote_plus(q)}&sort=date&fromage={window(21)}" + (f"&start={p * 10}" if p else "")},
     "bayt": {"name": "Bayt", "js": BAYT_JS, "detail": True, "where": lambda c: GULF_SLUG.get(c),
@@ -303,20 +304,24 @@ def _read_site(key: str, cfg: dict, profile: dict, sess: Session) -> list[dict]:
     queries = cfg.get("queries") or DEFAULT_QUERIES
     pages = max(1, int(cfg.get("pages", 1)))
     out, seen = [], set()
+    if site.get("group"):                # one search with all phrases joined by OR, newest first, paged until nothing is new
+        plan = [(" OR ".join(f'"{q}"' for q in queries), max(pages, int(cfg.get("group_pages", 6))))]
+    else:
+        plan = [(q, pages) for q in queries]
     tab = sess.tab()
     try:
         for country in countries(profile):
             where = site["where"](country)
             if not where:
                 continue
-            for q in queries:
-                for p in range(pages):
+            for q, q_pages in plan:
+                for p in range(q_pages):
                     _goto(tab, site["url"](where, q, p))
                     _check(tab, name)
                     rows = _eval(tab, site["js"]) or []
                     if not isinstance(rows, list):
                         rows = []
-                    new = 0
+                    new = unknown = 0
                     for r in rows[:60]:
                         if not isinstance(r, dict):
                             continue
@@ -336,9 +341,10 @@ def _read_site(key: str, cfg: dict, profile: dict, sess: Session) -> list[dict]:
                                 clean(text), name, c, posted)
                         if site["detail"]:
                             j["_snippet"] = True             # only the list's summary so far: worth opening the full ad
+                        unknown += dedupe_key(j) not in util.KNOWN
                         out.append(j)
-                    if new < 10:
-                        break
+                    if new < 10 or not unknown:
+                        break                                # last page, or only jobs seen before
                     time.sleep(random.uniform(1.5, 3.0))
                 time.sleep(random.uniform(1.5, 3.5))
     except Blocked:
