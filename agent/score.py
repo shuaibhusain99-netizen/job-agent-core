@@ -5,15 +5,23 @@ from datetime import date
 from functools import lru_cache
 from .util import countries, country_weight, years_experience, VAGUE
 
-YEARS_RANGE = re.compile(r"\b(\d{1,2})\s*(?:-|–|to)\s*(\d{1,2})\s*\+?\s*(?:years|yrs)", re.I)
-YEARS_MIN = re.compile(r"\b(?:minimum|min\.?|at least|more than|over)\s+(?:of\s+)?(\d{1,2})\s*\+?\s*(?:years|yrs)", re.I)
-YEARS_PLUS = re.compile(r"\b(\d{1,2})\s*\+\s*(?:years|yrs)", re.I)
-YEARS_ANY = re.compile(r"\b(\d{1,2})\s*(?:years|yrs)", re.I)
+NUM = r"(\d{1,2})(?:\.\d+)?"                  # '3.5 years' counts as 3
+YRS = r"(?:years?|yrs?)"
+YEARS_RANGE = re.compile(rf"\b{NUM}\s*(?:-|–|—|to|and)\s*{NUM}\s*\+?\s*{YRS}", re.I)          # 5-7 years, between 2 and 4 years
+YEARS_MIN = re.compile(rf"\b(?:minimum|min\.?|at least|more than|over)\s+(?:of\s+)?{NUM}\s*\+?\s*{YRS}", re.I)
+YEARS_PLUS = re.compile(rf"\b{NUM}\s*\+\s*{YRS}", re.I)
+YEARS_ANY = re.compile(rf"\b{NUM}\s*{YRS}", re.I)
+# 'Years of experience: 7', 'Experience (years): 3 - 5', 'Years of relevant experience required - 4'
+YEARS_AFTER = re.compile(rf"\b{YRS}\b[^.:;\n]{{0,40}}?\bexperience\b[^.:;\n]{{0,25}}?[:=\-–]\s*{NUM}(?:\s*(?:-|–|to)\s*{NUM})?(?!\s*%)|"
+                         rf"\bexperience\s*\({YRS}\)\s*[:=\-–]?\s*{NUM}(?:\s*(?:-|–|to)\s*{NUM})?", re.I)
 EXP_WORD = re.compile(r"\bexperience|\bexp\b|\bbackground\b|\bpost[- ]?qualification|\bpost[- ]?graduat", re.I)
 # sentences about the employer, not the candidate: "a contractor with over 25 years of experience in the Kingdom"
 COMPANY_TALK = re.compile(r"\b(we|our|us|company|firm|group|organi[sz]ation|established|founded|history|heritage|track record|"
                           r"legacy|in business|serving|has (over|more than)|have (over|more than)|since \d{4}|brings|boasts|"
                           r"operating|in operation|has been|have been|leading|leader|pioneer)\b", re.I)
+# ... unless the same sentence clearly asks something of the candidate: "we need a site engineer with 3-5 years"
+REQ_TALK = re.compile(r"\b(need|needs|require[sd]?|must|should|candidates?|applicants?|looking for|seeking|ideal|you (have|bring|possess|hold)|"
+                      r"possess|hold|holding)\b", re.I)
 
 
 def required_years(text: str, company: str = "") -> tuple[int | None, int | None]:
@@ -22,15 +30,21 @@ def required_years(text: str, company: str = "") -> tuple[int | None, int | None
     judged on the words just before the number, so a long paragraph that mentions 'we' elsewhere still counts."""
     co = re.sub(r"\s+(contracting|company|co|llc|ltd|group|corporation|inc)\b.*$", "", (company or "").lower()).strip()
     co = co if len(co) >= 3 and co not in ("unknown",) else ""
-    for sent in re.split(r"[.;\n•●▪]|\s[-+]\s", text):
+    # sentence ends: . ; newline, bullets, and a spaced dash/plus that is NOT between two numbers ('5 - 7 years' stays whole)
+    for sent in re.split(r"\.(?!\d)|[;\n•●▪]|(?<!\d)\s[-+]\s(?!\d)", text):
         if not EXP_WORD.search(sent):
             continue
-        for rx in (YEARS_RANGE, YEARS_MIN, YEARS_PLUS, YEARS_ANY):
+        for rx in (YEARS_RANGE, YEARS_MIN, YEARS_PLUS, YEARS_AFTER, YEARS_ANY):
             for m in rx.finditer(sent):
-                before = sent[max(0, m.start() - 60):m.start()]
-                if int(m.group(1)) > 15 or COMPANY_TALK.search(before) or (co and co in before.lower()):
+                nums = [g for g in m.groups() if g is not None]
+                if not nums:
                     continue
-                return (int(m.group(1)), int(m.group(2))) if rx is YEARS_RANGE else (int(m.group(1)), None)
+                before = sent[max(0, m.start() - 60):m.start()]
+                if int(nums[0]) > 15 or (COMPANY_TALK.search(before) and not REQ_TALK.search(before)) or (co and co in before.lower()):
+                    continue
+                lo = int(nums[0])
+                hi = int(nums[1]) if len(nums) > 1 and int(nums[1]) >= lo else None
+                return lo, hi
     return None, None
 
 
@@ -222,12 +236,10 @@ def score(j: dict, profile: dict) -> tuple[int, str, list[str]]:
             reasons.insert(1, "may sponsor a visa")
     j["salary"] = find_salary(j["title"] + " " + j.get("description", ""))
     j["apply_email"] = find_apply_email(j.get("description", ""))
-    if j["sector"]:
-        reasons.append("sector:" + j["sector"])
-    if j["salary"]:
-        reasons.append("pay: " + j["salary"])
-    if j["apply_email"]:
-        reasons.append("apply by e-mail")
+    tags = (["sector:" + j["sector"]] if j["sector"] else []) + (["pay: " + j["salary"]] if j["salary"] else []) \
+        + (["apply by e-mail"] if j["apply_email"] else [])
+    at = next((i for i, r in enumerate(reasons) if r.startswith("keywords:")), len(reasons))
+    reasons[at:at] = tags                          # short facts before the long keyword list, so a shortened note keeps them
     return best[0], verdict, reasons
 
 
@@ -314,7 +326,7 @@ def _score_one(j: dict, profile: dict, cat: str, c: dict) -> tuple[int, str, lis
     #    the title, company or ad shows construction / infrastructure work. With only a listing snippet we can't tell yet:
     #    a small penalty, and the full ad (fetched for promising jobs) decides.
     ctx_text = text + " " + j.get("company", "").lower()
-    short = len(desc) < 400
+    short = len(desc) < 400 or bool(j.get("_snippet"))          # a listing teaser, however long, isn't the ad
     need = c.get("require_any")
     if need and not any(_rx(w).search(ctx_text) for w in need):
         pts -= 5 if short else 20
@@ -333,7 +345,7 @@ def _score_one(j: dict, profile: dict, cat: str, c: dict) -> tuple[int, str, lis
             kw += p
             hits.append(term)
     pts += min(kw, 40)
-    if len(desc) < 400 and (matched or civilish) and j.get("source") not in profile["search"].get("no_listing_bonus_sources", []):
+    if short and (matched or civilish) and j.get("source") not in profile["search"].get("no_listing_bonus_sources", []):
         pts += 15          # only the listing snippet was available: don't punish for keywords it couldn't contain
         reasons.append("listing only")
     if hits:

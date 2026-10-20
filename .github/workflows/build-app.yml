@@ -17,10 +17,13 @@ jobs:
       - name: Tests (on Windows, before anything is built)
         run: python -m unittest discover -s tests -t . -v
       - run: pip install pyinstaller==6.11.1
+      - name: Build marker (so a newer copy can recognise an older one still running)
+        shell: pwsh
+        run: '"${{ github.sha }}".Substring(0, 12) + " " + (Get-Date -Format "yyyy-MM-dd") | Set-Content -NoNewline -Encoding ascii build.txt; Get-Content build.txt'
       - name: Build JobAgent.exe
         run: >
           pyinstaller --onefile --noconsole --name JobAgent --clean
-          --add-data "panel_local.html;." --add-data "agent/filler.js;agent" --add-data "profile.json;." --add-data "keys.json;." --add-data "sources.json;."
+          --add-data "panel_local.html;." --add-data "agent/filler.js;agent" --add-data "profile.json;." --add-data "keys.json;." --add-data "sources.json;." --add-data "build.txt;."
           --hidden-import main --hidden-import agent --hidden-import agent.sources --hidden-import agent.score
           --hidden-import agent.tailor --hidden-import agent.tracker --hidden-import agent.util --hidden-import agent.browser --hidden-import agent.ai --hidden-import agent.details --hidden-import agent.sitebrowse
           app.py
@@ -44,6 +47,14 @@ jobs:
           try { Invoke-WebRequest -UseBasicParsing -Headers @{ "X-JobAgent-Token" = $tok } "http://127.0.0.1:8765/api/file?path=keys.json" | Out-Null; throw "keys.json was readable" } catch { if ($_.Exception.Response.StatusCode.value__ -ne 404) { throw } }
           $k = Invoke-RestMethod -Headers @{ "X-JobAgent-Token" = $tok } http://127.0.0.1:8765/api/keys
           if ($null -eq $k.jooble) { throw "/api/keys did not answer" }
+          $s = Invoke-RestMethod -Headers @{ "X-JobAgent-Token" = $tok } http://127.0.0.1:8765/api/status
+          if ($s.build -eq "dev" -or -not $s.build) { throw "build marker missing from the exe" }
+          # a second copy must not bind the same port (Windows SO_REUSEADDR trap): it opens the running one's page and exits
+          $p2 = Start-Process -FilePath dist\JobAgent.exe -ArgumentList "--no-browser" -PassThru
+          Start-Sleep -Seconds 6
+          if (-not $p2.HasExited) { Stop-Process -Id $p2.Id -Force; throw "a second copy kept running next to the first" }
+          $listeners = (netstat -ano -p TCP | Select-String ":8765 " | Select-String "LISTENING" | Measure-Object).Count
+          if ($listeners -ne 1) { throw "expected exactly one listener on 8765, found $listeners" }
           if (-not (Test-Path dist\data\tracker.csv)) { throw "data folder was not created next to the exe" }
           Stop-Process -Id $p.Id -Force
       - name: Publish release

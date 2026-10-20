@@ -149,6 +149,31 @@ class ReviewFindings(unittest.TestCase):
         self.assertNotEqual(self.v("Civil Engineer - Riyadh", "Unknown", "Saudi Arabia", "Saudi Arabia", ad, source="Gulf Job Paper"), "reject")
 
 
+class YearsAsked(unittest.TestCase):
+    """How many years an ad asks for - the formats real ads use."""
+    def test_ranges_and_words(self):
+        cases = {"Candidates should have 5 - 7 years of experience in roads.": (5, 7), "5 – 7 years experience": (5, 7),
+                 "between 2 and 4 years of experience": (2, 4), "Experience: 03 - 05 years": (3, 5), "7 - 10 years' experience": (7, 10),
+                 "Years of experience: 7": (7, None), "Years of Experience Required: 3 - 5": (3, 5), "Experience (years): 4": (4, None),
+                 "3.5 years of experience required": (3, None), "min. 5 years experience": (5, None), "Requires 2 to 4 years experience": (2, 4),
+                 "0-2 years experience": (0, 2), "1 year experience": (1, None), "Relevant experience: 2 years": (2, None),
+                 "a 2-year contract. Experience 6 years": (6, None), "Bachelor degree + 2 yrs experience": (2, None)}
+        for text, want in cases.items():
+            self.assertEqual(required_years(text), want, text)
+
+    def test_company_history_versus_requirements(self):
+        self.assertEqual(required_years("Our company has been operating for 10 years with experience in roads"), (None, None))
+        self.assertEqual(required_years("We are a leading contractor with 12 years of experience in the Kingdom"), (None, None))
+        self.assertEqual(required_years("We are looking for candidates with 10 years of experience"), (10, None))
+        self.assertEqual(required_years("XYZ brings 12+ years of experience. We need a site engineer with 3-5 years of experience.", "XYZ Contracting"), (3, 5))
+        self.assertEqual(required_years("Established in 2005, we have 15 years of experience; the candidate should have 4 years experience"), (4, None))
+        self.assertEqual(required_years("experience 100 years"), (None, None))
+
+    def test_a_mid_range_ad_is_not_rejected(self):
+        s, v, j, why = run("Civil Engineer", "ACME", "Riyadh", "Saudi Arabia", "Civil engineer with 5 - 7 years of experience on roads." + LONG)
+        self.assertNotEqual(v, "reject", why)
+
+
 class Extraction(unittest.TestCase):
     def test_salary(self):
         self.assertEqual(find_salary("Salary: SAR 8,000 - 10,000 per month plus housing"), "SAR 8,000 - 10,000")

@@ -303,7 +303,7 @@ dialog.send textarea{min-height:280px}
           <h3>Daily search</h3>
           <p class="hint">Each search asks the sites only for ads posted since the last search, so a daily search takes a few minutes. Once a week, or after you change what to search, it does a full search of all recent ads (about 10 minutes). If the PC is off or asleep at that time, it runs as soon as the PC is on.</p>
           <div class="inline"><label class="small muted" for="schedHour">Time</label><select id="schedHour"></select><button id="schedBtn">Daily search: …</button></div>
-          <div class="inline" style="margin-top:8px"><button id="runFull">Run a full search now</button><button id="openFolder">Open data folder</button></div>
+          <div class="inline" style="margin-top:8px"><button id="runFull">Run a full search now</button><button id="openFolder">Open data folder</button><button class="quiet" id="quitApp" title="Stops the app on this PC. The daily search still runs on its own.">Quit Job Agent</button></div>
           <p class="small faint" id="dataDir"></p>
           <div class="runs" id="runs"></div>
         </div>
@@ -419,9 +419,10 @@ dialog.send textarea{min-height:280px}
       [/^senior title/,"A senior title - check the years they ask"],[/^needs a work visa/,"You'd need a work visa there and the ad doesn't say they sponsor one"],
       [/^may sponsor a visa$/,"The ad suggests they can sponsor a visa"],[/^sector:(.+)$/,(x,a)=>a==="oil_gas"?"Oil & gas employer":"Sector: "+a.replace(/_/g," ")],[/^pay: (.+)/,(x,a)=>`Pay stated: ${a}`],
       [/^apply by e-mail$/,"You can apply by e-mail"]];
-    for(const part of n.split(/;\s*/)){ const p=part.trim(); if(!p) continue; let done=false;
+    const parts=n.split(/;\s*/), cut=(notes||"").length>=295;      // a long note was shortened when saved: its last piece may be a fragment
+    parts.forEach((part,i)=>{ const p=part.trim(); if(!p) return; let done=false;
       for(const [rx,t] of P){ const mm=rx.exec(p); if(mm){ if(t) out.push(typeof t==="function"?t(...mm):t); done=true; break; } }
-      if(!done) out.push(p); }
+      if(!done && !(cut && i===parts.length-1)) out.push(p); });
     return {auto, lines:out};
   }
 
@@ -784,6 +785,11 @@ dialog.send textarea{min-height:280px}
   async function setSchedule(on){ try{ const r=await api("/api/schedule",{enable:on,hour:+$("schedHour").value}); toast(r.scheduled?`Daily search is on at ${$("schedHour").selectedOptions[0].textContent}`:(on?(r.message||"Couldn't turn it on"):"Daily search is off")); loadStatus(); }catch(e){ toast("Couldn't change it: "+e.message); } }
   $("schedBtn").addEventListener("click",()=>setSchedule(!$("schedBtn").dataset.on));
   $("schedHour").addEventListener("change",()=>{ if($("schedBtn").dataset.on) setSchedule(true); });
+  $("quitApp").addEventListener("click",async()=>{
+    try{ let r=await api("/api/quit",{}); if(r.ok===false&&r.error&&confirm(r.error.replace("or quit anyway.","Quit anyway?"))) r=await api("/api/quit",{force:true});
+      if(r.ok){ setState("off","Job Agent has quit - double-click JobAgent.exe to start it again"); $("runNow").disabled=true; clearTimeout(pollT); toast("Job Agent has quit. You can close this tab."); } }
+    catch(e){ setState("off","Job Agent has quit - double-click JobAgent.exe to start it again"); clearTimeout(pollT); }
+  });
   $("openFolder").addEventListener("click",async()=>{ try{ const r=await api("/api/open-folder",{}); toast(r.ok?"Opening the data folder":"Couldn't open it: "+(r.error||"")); }catch(e){ toast("Couldn't open it: "+e.message); } });
 
   // ---------- settings: your details

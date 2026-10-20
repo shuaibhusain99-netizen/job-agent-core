@@ -76,7 +76,7 @@ def cover_letter(j: dict, profile: dict) -> str:
     return (
         f"{date.today():%d %B %Y}\n\n"
         f"Dear Hiring Manager,\n\n"
-        f"I am applying for the {j['title']} position with {company}{(' in ' + loc) if loc else ''}. "
+        f"I am applying for the {clean_title(j['title'])} position with {company}{(' in ' + loc) if loc else ''}. "
         f"I am {intro.format(y=years_experience(profile))}{nebosh}.\n\n"
         f"{body}\n\n"
         f"{_authorisation_line(j, c)} My notice period is {c['notice_period']}. I would welcome the chance to "
@@ -94,6 +94,24 @@ SOURCES = {"unknown", "", "gulf job paper", "linkedin", "seek", "rigzone", "joob
 
 def _country_name(c: str) -> str:
     return f"the {c}" if c in THE else c
+
+
+NOISE = re.compile(r"\s*[\(\[][^\)\]]*(?:\d|\bref\b|\breq\b|\bid\b|\bcode\b|urgent|immediate|m/f|f/m)[^\)\]]*[\)\]]|"
+                   r"\s*[-–|:]\s*(?:urgent(?:ly)?(?: hiring| required)?|immediate (?:joining|start|hiring)|job ?id\s*\S+|ref\.?\s*\S+|#\s*\d+)\s*$|"
+                   r"\s*#\s*\d+\b|\s*\d{4,}\s*$", re.I)
+
+
+def clean_title(title: str) -> str:
+    """The title as you'd write it in a letter: without the ad's reference codes, 'URGENT!!!' and the like."""
+    t = re.sub(r"\s+", " ", str(title or "")).strip()
+    for _ in range(3):
+        t2 = NOISE.sub("", t).strip(" -–|:,!*")
+        if t2 == t:
+            break
+        t = t2
+    if t.isupper() and len(t) > 6:
+        t = t.title().replace("Qa/Qc", "QA/QC").replace("Hse", "HSE").replace("Mep", "MEP")
+    return t or str(title or "").strip()
 
 
 def _company(j: dict) -> str:

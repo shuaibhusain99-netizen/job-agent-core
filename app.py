@@ -25,6 +25,17 @@ HOME = Path(sys.executable).resolve().parent if FROZEN else Path(__file__).resol
 DATA = HOME / "data"
 PORT = 8765
 TOKEN = secrets.token_urlsafe(24)       # per-launch secret written into the page; every /api call must carry it
+
+
+def _build() -> str:
+    """Which build this is (written by the build workflow), so a newer copy can tell an older one is still running."""
+    try:
+        return (BUNDLE / "build.txt").read_text(encoding="utf-8").strip()[:40] or "dev"
+    except OSError:
+        return "dev"
+
+
+BUILD = _build()
 PRIVATE_FILES = {"mail.json", "cv.pdf", "keys.json"}          # never readable through /api/file (names compared in lower case)
 PRIVATE_DIRS = {"browser", "browser-search", "sent"}
 # /api/file is an allow-list: the only files the page reads, and the only ones it may write.
@@ -146,9 +157,23 @@ def upgrade_config() -> bool:
     return upgraded
 
 
+def alert(text: str, title: str = "Job Agent") -> None:
+    """A message the person can see even though the packaged app has no console (a Windows message box)."""
+    try:
+        if os.name == "nt":
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(0, text, title, 0x10)      # MB_ICONERROR
+            return
+    except Exception:
+        pass
+    print(f"{title}: {text}", file=sys.stderr if sys.stderr else sys.stdout)
+
+
 # ----------------------------------------------------------------------------- agent run
 STATE = {"running": False, "log": [], "started": "", "finished": "", "summary": ""}
 RUN_LOCK = "search.lock"
+LAST_POLL = [time.time()]            # when the page last asked for the status: the app quits itself after a long silence
+IDLE_QUIT = 2 * 3600
 
 
 def _claim_run() -> bool:
@@ -398,8 +423,10 @@ def _pack_path(rel: str) -> Path | None:
 def draft_email(row: dict) -> dict:
     """Subject + body for one tracker row, from its application pack when there is one."""
     from agent.util import years_experience
+    from agent.tailor import clean_title
     profile = json.loads((DATA / "profile.json").read_text(encoding="utf-8"))
     c = profile["candidate"]
+    title = clean_title(row.get("title", ""))
     body = ""
     pack = _pack_path(row.get("pack_file", ""))
     if pack:
@@ -412,12 +439,12 @@ def draft_email(row: dict) -> dict:
     if ai_letter:
         body = ai_letter
     if not body:
-        body = (f"Dear Hiring Manager,\n\nI would like to apply for the {row['title']} position"
+        body = (f"Dear Hiring Manager,\n\nI would like to apply for the {title} position"
                 f"{' with ' + row['company'] if row.get('company') and row['company'] not in ('Unknown', 'Gulf Job Paper') else ''}. "
                 f"I am a civil engineer with {years_experience(profile)} years of site and contract experience on water-network, roads and "
                 f"airport infrastructure in Bahrain, NEBOSH IGC certified, available on {c['notice_period']}' notice and ready to relocate.\n\n"
                 f"My CV is attached. I would welcome the chance to discuss the role.\n\nYours sincerely,\n{c['name']}\n{c['phone']} | {c['email']}")
-    subject = f"Application for {row['title']} - {c['name']}"
+    subject = f"Application for {title} - {c['name']}"
     return {"to": row.get("apply_email", ""), "subject": subject, "body": body, "cv": "CV.pdf" if (DATA / "CV.pdf").exists() else ""}
 
 
@@ -651,6 +678,7 @@ class Handler(BaseHTTPRequestHandler):
             self._nonce = secrets.token_urlsafe(18)    # only the app's own script may run on the page, even if a bug let markup in
             html = (BUNDLE / "panel_local.html").read_text(encoding="utf-8").replace("__JOBAGENT_TOKEN__", TOKEN)
             html = html.replace("<script>", f'<script nonce="{self._nonce}">', 1)
+            html = html.replace("<title>", f'<meta name="jobagent-build" content="{BUILD}">\n<title>', 1)
             return self._send(200, html.encode("utf-8"), "text/html; charset=utf-8")
         if u.path == "/api/file":
             p = self._safe(q.get("path", [""])[0])
@@ -668,6 +696,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"text": tracker.to_csv(rows)})
             return self._json({"text": p.read_text(encoding="utf-8", errors="replace")})
         if u.path == "/api/status":
+            LAST_POLL[0] = time.time()
             runs = []
             if (DATA / "runs.log").exists():
                 runs = [l.split("\t", 1) for l in (DATA / "runs.log").read_text(encoding="utf-8").splitlines()[-8:] if "\t" in l]
@@ -677,7 +706,7 @@ class Handler(BaseHTTPRequestHandler):
                                "log": STATE["log"][-6:] if not elsewhere else ["The daily search is running in the background"],
                                "summary": STATE["summary"], "started": STATE["started"],
                                "runs": [{"at": a, "summary": b} for a, b in reversed(runs)], "scheduled": schedule_status(),
-                               "schedule_hour": schedule_hour(), "data_dir": str(DATA)})
+                               "schedule_hour": schedule_hour(), "data_dir": str(DATA), "build": BUILD})
         if u.path == "/api/mail":
             return self._json(mail_public())
         if u.path == "/api/apply-status":
@@ -856,6 +885,13 @@ class Handler(BaseHTTPRequestHandler):
             text = ai.letter(job, profile, s_)
             _details().save(url, {"letter_ai": text})
             return self._json({"ok": True, "letter": text})
+        if u.path == "/api/quit":
+            if STATE["running"] and not d.get("force"):
+                return self._json({"ok": False, "error": "A search is running - wait for it to finish, or quit anyway."})
+            if any(not getattr(s_, "stop", True) for s_ in APPLY.values()) and not d.get("force"):
+                return self._json({"ok": False, "error": "The apply window is still open - finish there first, or quit anyway."})
+            threading.Thread(target=quit_app, daemon=True).start()
+            return self._json({"ok": True})
         if u.path == "/api/open-folder":
             try:
                 if os.name == "nt": os.startfile(DATA)  # type: ignore[attr-defined]
@@ -875,12 +911,23 @@ def _shutdown():
 
 
 class AppServer(ThreadingHTTPServer):
-    """At most 32 requests at a time: another program on this PC can't tie up the app by opening connections."""
+    """At most 32 requests at a time: another program on this PC can't tie up the app by opening connections.
+    On Windows the port is taken exclusively: a second copy of the app can't quietly bind the same port (Windows lets
+    two programs listen on one port when both use SO_REUSEADDR - requests then land on either copy)."""
     daemon_threads = True
+    allow_reuse_address = os.name != "nt"
 
     def __init__(self, *a, **kw):
         self._slots = threading.BoundedSemaphore(32)
         super().__init__(*a, **kw)
+
+    def server_bind(self):
+        if os.name == "nt":
+            import socket as _socket
+            flag = getattr(_socket, "SO_EXCLUSIVEADDRUSE", None)
+            if flag is not None:
+                self.socket.setsockopt(_socket.SOL_SOCKET, flag, 1)
+        super().server_bind()
 
     def process_request(self, request, client_address):
         if not self._slots.acquire(blocking=False):
@@ -899,8 +946,80 @@ class AppServer(ThreadingHTTPServer):
             self._slots.release()
 
 
+def quit_app(delay: float = 0.4) -> None:
+    """Stop the app: close the browsers it started and end the process (the data folder is already saved)."""
+    time.sleep(delay)
+    _shutdown()
+    try:
+        from agent import sitebrowse
+        sitebrowse.close()
+    except Exception:
+        pass
+    os._exit(0)
+
+
+def _idle_watch() -> None:
+    """With the page closed for hours, no search running and no apply window open, the app quits by itself - the daily
+    search is a separate scheduled task, so nothing needs the app running in the background."""
+    while True:
+        time.sleep(60)
+        quiet = time.time() - LAST_POLL[0] > IDLE_QUIT
+        busy = STATE["running"] or any(not getattr(s_, "stop", True) for s_ in APPLY.values())
+        if quiet and not busy:
+            quit_app(0)
+
+
+def already_running() -> str:
+    """What is on our port: 'same' (this build of the app), 'older' (another build of the app), or '' (something else)."""
+    try:
+        import urllib.request
+        with urllib.request.urlopen(f"http://127.0.0.1:{PORT}/", timeout=3) as r:
+            page = r.read(200_000)
+    except Exception:
+        return ""
+    if b"<title>Job Agent</title>" not in page:
+        return ""
+    m = re.search(rb'name="jobagent-build" content="([^"]*)"', page)
+    return "same" if m and m.group(1).decode(errors="replace") == BUILD else "older"
+
+
+def _listening_pids(port: int) -> set[int]:
+    """Processes listening on a local port (Windows)."""
+    try:
+        out = subprocess.run(["netstat", "-ano", "-p", "TCP"], capture_output=True, text=True, timeout=20,
+                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
+    except Exception:
+        return set()
+    pids = set()
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) >= 5 and parts[0].upper() == "TCP" and parts[1].endswith(f":{port}") and parts[3].upper() == "LISTENING":
+            try:
+                pids.add(int(parts[4]))
+            except ValueError:
+                pass
+    return pids - {os.getpid()}
+
+
+def stop_older_copy() -> bool:
+    """An older copy of the app is still running on the port (there was no Quit button before): stop it so this one
+    can start - unless it is in the middle of a search."""
+    if os.name != "nt":
+        return False
+    lock = DATA / RUN_LOCK
+    if lock.exists() and time.time() - lock.stat().st_mtime < 3 * 3600:
+        return False
+    pids = _listening_pids(PORT)
+    for pid in pids:
+        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    for _ in range(20):
+        if not _listening_pids(PORT):
+            return True
+        time.sleep(0.5)
+    return not _listening_pids(PORT)
+
+
 def serve(open_browser=True):
-    ensure_data()
     sys.path.insert(0, str(BUNDLE))
     import atexit
     atexit.register(_shutdown)
@@ -909,6 +1028,7 @@ def serve(open_browser=True):
     if open_browser:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()
     print(f"Job Agent running at {url}  (data in {DATA})")
+    threading.Thread(target=_idle_watch, daemon=True).start()
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
@@ -920,7 +1040,12 @@ if __name__ == "__main__":
     ap.add_argument("--run", action="store_true", help="search once and exit (used by the scheduled task)")
     ap.add_argument("--no-browser", action="store_true")
     a = ap.parse_args()
-    ensure_data()
+    try:
+        ensure_data()
+    except Exception as e:  # noqa - e.g. the exe sits in a folder that can't be written (Program Files, a CD, a locked share)
+        alert(f"Job Agent can't create its data folder next to the program:\n{DATA}\n\n{type(e).__name__}: {e}\n\n"
+              "Move JobAgent.exe to a folder you can write to (for example Documents\\JobAgent) and start it again.")
+        sys.exit(1)
     sys.path.insert(0, str(BUNDLE))
     if a.run:
         run_agent(block=True)
@@ -928,5 +1053,22 @@ if __name__ == "__main__":
     else:
         try:
             serve(open_browser=not a.no_browser)
-        except OSError:
-            webbrowser.open(f"http://127.0.0.1:{PORT}/")   # already running: just open it
+        except OSError as e:
+            what = already_running()
+            if what == "same":
+                if not a.no_browser:
+                    webbrowser.open(f"http://127.0.0.1:{PORT}/")   # already running: just open its page
+            elif what == "older" and stop_older_copy():
+                try:
+                    serve(open_browser=not a.no_browser)       # the older copy is gone: start this one
+                except OSError as e2:
+                    alert(f"Job Agent couldn't take over port {PORT} from the older copy ({e2}). Restart the PC and try again.")
+                    sys.exit(1)
+            elif what == "older":
+                alert("An older copy of Job Agent is still running and is in the middle of a search. Wait for it to finish "
+                      "(or end JobAgent.exe in Task Manager), then start this one again.")
+                sys.exit(1)
+            else:
+                alert(f"Job Agent can't start: another program is using port {PORT} on this PC ({e}).\n\n"
+                      "Close that program (or restart the PC) and try again.")
+                sys.exit(1)

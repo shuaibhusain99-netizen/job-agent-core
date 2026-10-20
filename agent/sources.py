@@ -186,7 +186,11 @@ def fetch_linkedin(cfg: dict, profile: dict) -> list[dict]:
     groups = linkedin_groups(profile, cfg)
     budget = int(cfg.get("max_requests", 220))
     requests = 0
-    for country in countries(profile):
+    from datetime import date
+    cs = countries(profile)
+    k = date.today().toordinal() % max(1, len(cs))
+    cs = cs[k:] + cs[:k]                 # a different country goes first each day: if LinkedIn stops us early, all get their turn
+    for country in cs:
         country_hits, challenged, seen = 0, 0, set()
         for kw, max_pages in groups:
             start = 0
@@ -294,6 +298,7 @@ def fetch_seek(cfg: dict, profile: dict) -> list[dict]:
                     desc = "\n".join([r.get("teaser") or ""] + [str(b) for b in (r.get("bulletPoints") or [])] + [r.get("salaryLabel") or ""])
                     j = job(r.get("title"), (r.get("advertiser") or {}).get("description") or r.get("companyName"),
                             loc, f"https://www.seek.com.au/job/{jid}", desc, "SEEK", "Australia", (r.get("listingDate") or "")[:10])
+                    j["_snippet"] = True                     # teaser + bullet points only: the full ad is read for matches
                     unknown += not util.is_known(j)
                     out.append(j)
                 except Exception:
@@ -303,6 +308,21 @@ def fetch_seek(cfg: dict, profile: dict) -> list[dict]:
             time.sleep(0.6)
     log(f"SEEK: {len(out)} rows")
     return out
+
+
+def enrich_seek(j: dict) -> None:
+    """The full SEEK ad (its job pages block programs, but the site's own GraphQL call answers)."""
+    m = re.search(r"seek\.com\.au/job/(\d+)", j["url"])
+    if not m:
+        return
+    q = {"query": "query($id: ID!){ jobDetails(id:$id){ job { content listedAt { dateTimeUtc } } } }", "variables": {"id": m.group(1)}}
+    status, data = http_json("https://www.seek.com.au/graphql", q, headers={"Origin": "https://www.seek.com.au", "Referer": j["url"]})
+    jd = (((data or {}).get("data") or {}).get("jobDetails") or {}).get("job") or {}
+    text = clean(jd.get("content") or "", keep_lines=True)
+    if status == 200 and len(text) > 150:
+        j["description"] = (j.get("description", "") + "\n" + text).strip()[:6000]     # the listing's pay line + the ad
+        if not j.get("posted") and (jd.get("listedAt") or {}).get("dateTimeUtc"):
+            j["posted"] = str(jd["listedAt"]["dateTimeUtc"])[:10]
 
 
 # ---------------------------------------------------------------- Workday (employer ATS, reliable)
@@ -715,7 +735,12 @@ def _ef_board(b: dict, cfg: dict, profile: dict) -> list[dict]:
                         if link.startswith("/"):
                             link = f"https://{host}{link}"
                         ts = r.get("postedTs") or r.get("t_update")            # t_create is when the req was opened, not posted
-                        posted = datetime.fromtimestamp(int(ts), timezone.utc).date().isoformat() if ts else ""
+                        posted = ""
+                        try:
+                            ts = float(ts)
+                            posted = datetime.fromtimestamp(ts / 1000 if ts > 1e11 else ts, timezone.utc).date().isoformat()
+                        except (TypeError, ValueError, OverflowError, OSError):
+                            pass                                                   # an odd date never loses the job
                         j = job(r.get("name"), b["company"], loc, link, r.get("job_description") or "", "Career site", c or country, posted)
                         out.append(j)
                     except Exception:
@@ -940,7 +965,7 @@ def enrich_oracle(j: dict) -> None:
 
 
 ENRICHERS = {"Workday": enrich_workday, "SuccessFactors": enrich_successfactors, "Workable": enrich_workable,
-             "LinkedIn": enrich_linkedin, **{n: sitebrowse.enrich for n in sitebrowse.DETAIL_SOURCES}, "Rigzone": enrich_rigzone, "Career site": lambda j: enrich_career(j)}
+             "LinkedIn": enrich_linkedin, "SEEK": enrich_seek, **{n: sitebrowse.enrich for n in sitebrowse.DETAIL_SOURCES}, "Rigzone": enrich_rigzone, "Career site": lambda j: enrich_career(j)}
 
 
 def enrich_smartrecruiters(j: dict) -> None:
@@ -1002,10 +1027,13 @@ def enrich(j: dict) -> None:
     """Fetch the full posting text for sources that only gave a title in the listing."""
     fn = ENRICHERS.get(j["source"])
     if fn and (len(j.get("description", "")) < 300 or j.get("_snippet")):
+        before = len(j.get("description", ""))
         try:
             fn(j)
         except Exception as e:  # never let one posting kill the run
             log(f"  enrich failed {j['url'][:60]}: {e}")
+        if len(j.get("description", "")) > before and len(j["description"]) >= 300:
+            j.pop("_snippet", None)                     # the full ad is in
 
 
 LAST_COUNTS: dict[str, int] = {}          # jobs each source returned in the last fetch_all (main records which worked)
@@ -1045,8 +1073,8 @@ def fetch_all(sources: dict, profile: dict) -> list[dict]:
 
 # Full ads: one queue per website (all of LinkedIn's country sites are one website), a pause between requests, a cap per
 # search for the strictest site, and a stop for that site the moment it asks us to slow down.
-SITE_PAUSE = {"linkedin.com": (1.5, 3.0)}
-SITE_CAP = {"linkedin.com": 120}
+SITE_PAUSE = {"linkedin.com": (1.5, 3.0), "seek.com.au": (0.6, 1.2)}
+SITE_CAP = {"linkedin.com": 120, "seek.com.au": 150}
 
 
 def enrich_many(jobs: list[dict], budget: int) -> int:

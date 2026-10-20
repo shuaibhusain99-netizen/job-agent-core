@@ -298,11 +298,11 @@ def row_from_job(j: dict) -> dict:
         "found_date": today, "last_seen": today, "score": j["match_score"], "verdict": j["verdict"],
         "title": j["title"], "company": j["company"], "location": j["location"], "country": j.get("country", ""),
         "source": j["source"], "url": j["url"],
-        "status": {"apply": "New", "found": "Found (apply off)"}.get(j["verdict"], "Review"), "applied_date": "", "notes": j["reasons"][:200],
+        "status": {"apply": "New", "found": "Found (apply off)"}.get(j["verdict"], "Review"), "applied_date": "", "notes": j["reasons"][:300],
         "pack_file": j.get("pack_file", ""), "user_notes": "", "category": j.get("category", "civil"),
         "sector": j.get("sector", ""), "salary": j.get("salary", ""), "apply_email": j.get("apply_email", ""),
-        "posted": j.get("posted", ""), "desc_len": str(len(j.get("description", ""))), "level": j.get("level", ""),
-        "ai_fit": (j.get("ai") or {}).get("fit", ""), "ai_summary": (j.get("ai") or {}).get("summary", "")[:200],
+        "posted": j.get("posted", ""), "desc_len": str(text_len(j)), "level": j.get("level", ""),
+        "ai_fit": (j.get("ai") or {}).get("fit", ""), "ai_summary": (j.get("ai") or {}).get("summary", "")[:300],
     }
 
 
@@ -325,6 +325,13 @@ def rejudgeable(row: dict) -> bool:
     return _untouched(row) or auto_skipped(row)
 
 
+def text_len(j: dict) -> int:
+    """How much of the ad a job was judged on. A listing teaser (SEEK's bullet points, a Bayt summary) counts as a
+    listing however long it is, so the full ad is still read for a match."""
+    n = len(j.get("description", ""))
+    return min(n, 299) if j.get("_snippet") else n
+
+
 def _known_len(row: dict) -> int:
     if _s(row.get("desc_len")).strip():
         return _int(row["desc_len"])
@@ -345,7 +352,7 @@ def refresh(row: dict, j: dict, apply_countries: list[str] | None = None, seen: 
             changed = "updated"
     if not rejudgeable(row):
         return changed
-    new_len = len(j.get("description", ""))
+    new_len = text_len(j)
     if new_len < _known_len(row):
         return changed
     if new_len > _known_len(row):
@@ -353,21 +360,21 @@ def refresh(row: dict, j: dict, apply_countries: list[str] | None = None, seen: 
         changed = "updated"
     if j["verdict"] == "reject":
         was = row.get("status")
-        row.update(status="Skipped", verdict="reject", notes=("auto: " + j["reasons"])[:200], score=j["match_score"],
+        row.update(status="Skipped", verdict="reject", notes=("auto: " + j["reasons"])[:300], score=j["match_score"],
                    category=j.get("category", row.get("category", "")), sector=j.get("sector", ""), level=j.get("level", row.get("level", "")),
                    desc_len=str(new_len))
         if j.get("ai"):
-            row["ai_fit"], row["ai_summary"] = j["ai"].get("fit", ""), j["ai"].get("summary", "")[:200]
+            row["ai_fit"], row["ai_summary"] = j["ai"].get("fit", ""), j["ai"].get("summary", "")[:300]
         return "skipped" if was != "Skipped" else changed
     status = "New" if j["verdict"] == "apply" else "Review"
     if status == "New" and apply_countries is not None and j.get("country") and j["country"] not in apply_countries:
         status = "Found (apply off)"
     if (_s(row.get("score")), row.get("status"), row.get("category"), row.get("sector")) != \
             (_s(j["match_score"]), status, j.get("category"), j.get("sector", "")):
-        row.update(score=j["match_score"], verdict=j["verdict"], status=status, notes=j["reasons"][:200],
+        row.update(score=j["match_score"], verdict=j["verdict"], status=status, notes=j["reasons"][:300],
                    category=j.get("category", row.get("category")), sector=j.get("sector", ""), desc_len=str(new_len),
                    level=j.get("level", row.get("level", "")), ai_fit=(j.get("ai") or {}).get("fit", row.get("ai_fit", "")),
-                   ai_summary=(j.get("ai") or {}).get("summary", row.get("ai_summary", ""))[:200])
+                   ai_summary=(j.get("ai") or {}).get("summary", row.get("ai_summary", ""))[:300])
         changed = "updated"
     return changed
 
@@ -396,11 +403,11 @@ def reopen_after_rule_changes(rows: dict[str, dict], profile: dict, details_load
         j = _job_from_row(r, d.get("description", ""))
         s, v, why = score(j, profile)
         if v == "reject":
-            r["notes"] = ("auto: " + "; ".join(why))[:200]          # same decision, but now with the real reason
+            r["notes"] = ("auto: " + "; ".join(why))[:300]          # same decision, but now with the real reason
             r["score"] = s
             continue
         r.update(status="Review", verdict=v, score=s, category=j["category"], level=j.get("level", ""), sector=j.get("sector", ""),
-                 notes=("re-opened (rules updated): " + "; ".join(why))[:200])
+                 notes=("re-opened (rules updated): " + "; ".join(why))[:300])
         n += 1
     return n
 
@@ -442,7 +449,7 @@ def rescore_with_new_rules(rows: dict[str, dict], profile: dict, details_load, a
                 r["desc_len"] = "0"                    # judged on an ad we don't have: read it again next time it's seen
             cap = _cap_without_ad(r, profile)
             if cap and r.get("status") == "New":       # limits that hold whatever the ad says: To apply waits for the ad
-                r.update(status="Review", verdict="maybe", notes=(cap + "; " + _s(r.get("notes")))[:200])
+                r.update(status="Review", verdict="maybe", notes=(cap + "; " + _s(r.get("notes")))[:300])
                 n += 1
             continue
         j = _job_from_row(r, desc)
@@ -486,7 +493,7 @@ def sweep_titles(rows: dict[str, dict], profile: dict) -> list[dict]:
             continue
         why = title_only_reject(_s(r.get("title")), profile)
         if why and not (why.startswith("title:") and _known_len(r) >= 400):
-            r["status"], r["verdict"], r["notes"] = "Skipped", "reject", ("auto: " + why)[:200]
+            r["status"], r["verdict"], r["notes"] = "Skipped", "reject", ("auto: " + why)[:300]
             r["score"] = "0"                           # what the title rules give it - not the old match
             out.append(r)
     return out

@@ -65,9 +65,12 @@
     [/\bvisa\b/i, WORK("No", "Yes")],
     [/\brelocat|\bwilling to (move|travel|work)|\bonsite|\bon-site|\bshift|\brotation|\bovertime/i, "Yes"],
     [/\b(18|eighteen)\b|\blegal age\b|\badult\b/i, "Yes"],
-    [/\bdriv(ing|er'?s?)\s*licen[cs]e\b/i, "Yes"],
+    // a licence of a named foreign country / an international permit is yours to answer
+    [/\bdriv(ing|er'?s?)\s*licen[cs]e\b/i, (d) => /saudi|uae|emirat|qatar|kuwait|oman|canad|austral|international|\bidp\b|heavy|hgv|forklift/i.test(d) ? null : "Yes"],
     [/\bnebosh|iosh|safety\s*(cert|card)|\bhse\b/i, "Yes"],
-    [/\b(bachelor|degree|engineering degree|b\.?sc)\b/i, "Yes"],
+    // a bachelor's he has; a master's, PhD, MBA, chartership or a named other discipline he has not
+    [/\b(master|msc|m\.sc|phd|doctor|mba|post-?grad|chartered|licensed)\b/i, "No"],
+    [/\b(bachelor|degree|engineering degree|b\.?sc)\b/i, (d) => /\b(electrical|mechanical|chemical|petroleum|computer|software|architect)/i.test(d) ? "No" : "Yes"],
     [/\bautocad|civil ?3d|ms project|excel\b/i, "Yes"],
     [/\bcivil engineer(ing)?\b.*\b(experience|background)\b/i, "Yes"],
     [/\bsaudi council|\bsce\b/i, F.sce_registered || "No"],
@@ -172,7 +175,7 @@
     for (const [rx, v] of RULES) if (rx.test(d)) return typeof v === "function" ? v(d, el) : v;
     return null;
   }
-  function yesNoFor(d) { for (const [rx, v] of YESNO) if (rx.test(d)) return v; return null; }   // null = leave it to you
+  function yesNoFor(d) { for (const [rx, v] of YESNO) if (rx.test(d)) return typeof v === "function" ? v(d) : v; return null; }   // null = leave it to you
 
   // the only element the filler ever clicks: one option of a Yes/No (or similar) question - never a button or link
   function tick(g) {
@@ -231,6 +234,7 @@
       }
       if (el.value && el.value.trim()) continue;        // never overwrite what is already there
       if (isCombo(el)) {                                 // react-select style dropdown: type, then pick the matching option
+        if (!AUTO) continue;                             // only on known job sites: elsewhere a dropdown is yours to pick
         const yn = yesNoFor(d); let want = yn || valueFor(el, d);
         if (want) { fillCombo(el, String(want)); filled++; }
         continue;
@@ -312,8 +316,10 @@
     findOption(want) {
       const w = String(want).toLowerCase();
       const notPhone = o => !o.closest('[class*="iti"],[class*="flag"],[class*="dial"]');
-      let opts = [...document.querySelectorAll('[role="option"]')].filter(o => vis(o) && notPhone(o));
-      if (!opts.length) opts = [...document.querySelectorAll('[class*="option"],[class*="Option"]')].filter(o => vis(o) && notPhone(o) && !o.querySelector("input") && o.textContent.trim().length < 120);
+      // an "option" must be a plain list entry - never a button, link, submit control or anything inside one
+      const plain = o => !o.closest('button,a,input,select,textarea,label,[type="submit"],[role="button"],[role="link"],[role="menuitem"]');
+      let opts = [...document.querySelectorAll('[role="option"]')].filter(o => vis(o) && notPhone(o) && plain(o));
+      if (!opts.length) opts = [...document.querySelectorAll('[class*="option"],[class*="Option"]')].filter(o => vis(o) && notPhone(o) && plain(o) && !o.querySelector("input,button,a") && o.textContent.trim().length < 120);
       const t = opts.map(o => ({ o, t: o.textContent.replace(/\s+/g, " ").trim().toLowerCase() }));
       const yn = (w === "yes" || w === "no");
       const sw = t.filter(x => x.t === w || x.t.startsWith(w + " ") || x.t.startsWith(w + ",") || x.t.startsWith(w + " -") || x.t === w + ".").sort((a, b) => a.t.length - b.t.length);

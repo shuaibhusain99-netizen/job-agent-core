@@ -183,6 +183,16 @@ class AppAPI(unittest.TestCase):
         finally:
             path.write_bytes(before)
 
+    def test_quit_waits_for_a_running_search(self):
+        app.STATE["running"] = True
+        try:
+            st, _, body = self.req("POST", "/api/quit", {})
+            self.assertFalse(json.loads(body)["ok"])
+            self.assertIn("search is running", json.loads(body)["error"])
+        finally:
+            app.STATE["running"] = False
+        self.assertEqual(self.req("POST", "/api/quit", {}, token=False)[0], 403)      # another site can't stop the app
+
     def test_page_only_reads_and_writes_its_own_files(self):
         for name in ("tracker.csv", "profile.json", "sources.json"):
             self.assertEqual(self.req("GET", "/api/file?path=" + name)[0], 200, name)

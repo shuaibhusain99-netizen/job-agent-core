@@ -402,6 +402,9 @@ class ApplySession:
     def _click(self, obj: str) -> bool:
         """Real mouse click on an element - only if the element (not something laid over it) is what's under the pointer."""
         x, y = self._point(obj)
+        if self._on(obj, "function(){return !!this.closest('button,a,[type=submit],[role=button],[role=link]')}"):
+            self.log.append("skipped a click: that element is a button or link")      # the helper never presses buttons
+            return False
         if not self._on(obj, "function(x,y){const h=document.elementFromPoint(x,y);if(!h)return false;"
                              "const box=this.closest('[class*=control],[role=combobox],[class*=select]')||this;"
                              "return h===this||this.contains(h)||h.contains(this)&&h.getBoundingClientRect().width<=box.getBoundingClientRect().width*1.5||box.contains(h);}", x, y):
