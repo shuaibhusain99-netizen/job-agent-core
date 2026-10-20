@@ -1,7 +1,7 @@
 """AI reviewer: reads each promising ad the way a recruiter would and judges it against the candidate.
 
 Works with any OpenAI-compatible chat API:
-  - Groq (free account, no card): base_url https://api.groq.com/openai/v1, model e.g. meta-llama/llama-4-scout-17b-16e-instruct
+  - Groq (free account, no card): base_url https://api.groq.com/openai/v1, model e.g. openai/gpt-oss-120b
   - Ollama on the same PC (free, fully private): base_url http://127.0.0.1:11434/v1, model e.g. qwen2.5:7b
 Settings live in keys.json -> "ai". Off unless a provider is configured.
 
@@ -19,9 +19,11 @@ from urllib.request import Request, urlopen
 from .util import log, years_experience
 
 PROVIDERS = {
-    "groq": {"base_url": "https://api.groq.com/openai/v1", "model": "meta-llama/llama-4-scout-17b-16e-instruct", "rpm": 25},
+    "groq": {"base_url": "https://api.groq.com/openai/v1", "model": "openai/gpt-oss-120b", "rpm": 25},
     "ollama": {"base_url": "http://127.0.0.1:11434/v1", "model": "qwen2.5:7b", "rpm": 600},
 }
+# Groq retires models now and then; when the chosen one is gone, the first of these the account still has is used instead
+GROQ_FALLBACK = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b", "llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
 ROLE_FAMILIES = ["civil", "oil_gas", "hse", "qs_planning", "stores_supply", "data_reporting", "site_support", "other"]
 LEVELS = ["starter", "support", "match", "senior"]
 USAGE: Path = Path("ai_usage.json")       # set by main / app
@@ -71,10 +73,33 @@ def _usage(add: int = 0) -> int:
     return u["count"]
 
 
+def _thinks(model: str) -> bool:
+    return bool(re.search(r"gpt-oss|qwen3|deepseek-r1|reason", model or "", re.I))
+
+
+def _models(s: dict) -> list[str]:
+    req = Request(s["base_url"].rstrip("/") + "/models", headers={"Authorization": f"Bearer {s.get('api_key', '')}", "User-Agent": "JobAgent/1.0"})
+    with urlopen(req, timeout=30) as r:
+        return [m.get("id", "") for m in json.loads(r.read(2_000_000)).get("data", []) if m.get("active", True)]
+
+
+def _replacement(s: dict) -> str:
+    """A model this Groq account still has, in place of one Groq has retired - or '' when none is known."""
+    try:
+        have = _models(s)
+    except Exception:  # noqa
+        return ""
+    return next((m for m in GROQ_FALLBACK if m in have and m != s.get("model")), "")
+
+
 def chat(s: dict, system: str, user: str, json_mode: bool = True, max_tokens: int = 700, timeout: int = 60) -> str:
     """One chat completion. Retries politely on rate limits. Raises on hard errors."""
     body = {"model": s["model"], "temperature": 0.1, "max_tokens": max_tokens,
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
+    if _thinks(s["model"]):          # reasoning models: think briefly, and leave room for the answer after the thinking
+        body["max_tokens"] = max(max_tokens * 3, 2000)
+        if s.get("provider") == "groq":
+            body.update(reasoning_effort="low", include_reasoning=False)
     if json_mode:
         body["response_format"] = {"type": "json_object"}
     headers = {"Content-Type": "application/json", "User-Agent": "JobAgent/1.0"}
@@ -102,10 +127,22 @@ def chat(s: dict, system: str, user: str, json_mode: bool = True, max_tokens: in
                     wait = 0
                 time.sleep(min(60, max(wait, 5 * (attempt + 1))))
                 continue
-            if e.code == 400 and json_mode and attempt == 0:       # model without JSON mode: ask in the prompt instead
-                body.pop("response_format", None)
+            detail = e.read(600).decode("utf-8", "replace")
+            if e.code == 400 and attempt == 0 and ("response_format" in body or "reasoning_effort" in body):
+                body.pop("response_format", None)                  # model without JSON mode: ask in the prompt instead
+                body.pop("reasoning_effort", None); body.pop("include_reasoning", None)
                 continue
-            detail = e.read(300).decode("utf-8", "replace")
+            if e.code == 404 and s.get("provider") == "groq" and "model" in detail and attempt == 0:
+                new = _replacement(s)
+                if new:
+                    log(f"AI reviewer: Groq no longer has {s['model']} - using {new}")
+                    s["model"] = body["model"] = new
+                    if _thinks(new):
+                        body["max_tokens"] = max(max_tokens * 3, 2000)
+                        body.update(reasoning_effort="low", include_reasoning=False)
+                    continue
+                raise RuntimeError(f"Groq no longer offers the model {s['model']}. Clear the Model box in Settings > AI reviewer "
+                                   "to use the recommended one.") from None
             raise RuntimeError(f"AI HTTP {e.code}: {detail}") from None
         except (URLError, TimeoutError, OSError) as e:
             if attempt < 2:

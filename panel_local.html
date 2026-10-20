@@ -944,10 +944,10 @@ dialog.send #mcAd{min-height:90px}
       $("aiKeyState").textContent=s.api_key?"(saved, ends "+s.api_key.slice(-4)+")":"(not set)"; $("aiKeyRow").hidden=$("aiProv").value!=="groq";
       aiActive=!!a.active; $("aiBadge").textContent=aiActive?"on":"off"; $("aiBadge").classList.toggle("on",aiActive);
       $("aiUsed").textContent=a.used_today?a.used_today+" ads read today":"";
-      $("aiModel").placeholder=$("aiProv").value==="groq"?"meta-llama/llama-4-scout-17b-16e-instruct":"qwen2.5:7b";
+      $("aiModel").placeholder=$("aiProv").value==="groq"?"openai/gpt-oss-120b":"qwen2.5:7b";
     }catch(_){}
   }
-  $("aiProv").addEventListener("change",()=>{ $("aiKeyRow").hidden=$("aiProv").value!=="groq"; $("aiModel").placeholder=$("aiProv").value==="groq"?"meta-llama/llama-4-scout-17b-16e-instruct":"qwen2.5:7b"; });
+  $("aiProv").addEventListener("change",()=>{ $("aiKeyRow").hidden=$("aiProv").value!=="groq"; $("aiModel").placeholder=$("aiProv").value==="groq"?"openai/gpt-oss-120b":"qwen2.5:7b"; });
   $("aiSave").addEventListener("click",async()=>{ if(!$("aiMax").reportValidity()) return;
     const d={provider:$("aiProv").value,model:$("aiModel").value.trim(),max_per_run:+$("aiMax").value,enabled:$("aiOn").checked}; if($("aiKey").value.trim()) d.api_key=$("aiKey").value.trim();
     try{ const r=await api("/api/ai",d); if(r.ok===false) throw new Error(r.error); $("aiKey").value=""; toast(r.why_off?"Saved - stays off until you "+r.why_off:"AI settings saved"); loadAI(); }catch(e){ toast("Not saved: "+e.message); } });
