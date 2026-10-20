@@ -89,6 +89,18 @@ COUNTRY_HINTS = {
 }
 
 
+def years_experience(profile: dict) -> int:
+    """Whole years since candidate.experience_start (YYYY-MM); falls back to the fixed number."""
+    c = profile["candidate"]
+    try:
+        from datetime import date
+        y, m = (int(x) for x in str(c.get("experience_start", "")).split("-")[:2])
+        t = date.today()
+        return max(0, (t.year - y) * 12 + (t.month - m)) // 12
+    except Exception:
+        return int(c.get("years_experience", 0))
+
+
 def countries(profile: dict, flag: str = "search") -> list[str]:
     """Countries whose config has flag=True (config is {name: {weight, search, apply}})."""
     out = []

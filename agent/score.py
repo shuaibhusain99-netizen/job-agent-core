@@ -1,7 +1,7 @@
 """Score a job against profile.json. Transparent rules, 0-100, with the reasons recorded."""
 from __future__ import annotations
 import re
-from .util import countries, country_weight
+from .util import countries, country_weight, years_experience
 
 YEARS_RANGE = re.compile(r"\b(\d{1,2})\s*(?:-|–|to)\s*(\d{1,2})\s*\+?\s*(?:years|yrs)", re.I)
 YEARS_MIN = re.compile(r"\b(?:minimum|min\.?|at least|more than|over)\s+(?:of\s+)?(\d{1,2})\s*\+?\s*(?:years|yrs)", re.I)
@@ -9,17 +9,21 @@ YEARS_PLUS = re.compile(r"\b(\d{1,2})\s*\+\s*(?:years|yrs)", re.I)
 YEARS_ANY = re.compile(r"\b(\d{1,2})\s*(?:years|yrs)", re.I)
 
 
+EXP_WORD = re.compile(r"\bexperience|\bexp\b|\bbackground\b|\bpost[- ]?qualification|\bpost[- ]?graduat", re.I)
+
+
 def required_years(text: str) -> tuple[int | None, int | None]:
-    """Return (min, max) years asked for, if the text states them."""
-    m = YEARS_RANGE.search(text)
-    if m:
-        return int(m.group(1)), int(m.group(2))
-    m = YEARS_MIN.search(text) or YEARS_PLUS.search(text)
-    if m:
-        return int(m.group(1)), None
-    m = YEARS_ANY.search(text)
-    if m:
-        return int(m.group(1)), None
+    """(min, max) years of experience the posting asks for. Only sentences that talk about experience count,
+    so 'a company with 25 years of history' or 'a 2-year contract' are ignored."""
+    for sent in re.split(r"[.;\n\u2022\u25cf\u25aa]|\s-\s", text):
+        if not EXP_WORD.search(sent):
+            continue
+        m = YEARS_RANGE.search(sent)
+        if m:
+            return int(m.group(1)), int(m.group(2))
+        m = YEARS_MIN.search(sent) or YEARS_PLUS.search(sent) or YEARS_ANY.search(sent)
+        if m:
+            return int(m.group(1)), None
     return None, None
 
 
@@ -96,8 +100,14 @@ def _score_one(j: dict, profile: dict, cat: str, target_titles: list, keyword_po
     reasons: list[str] = [f"category:{cat}"]
     pts = 0
 
+    # 0. Titles that exclude you outright (nationals-only roles etc.)
+    for pat in profile.get("title_reject_patterns", []):
+        if re.search(pat, title, re.I):
+            return 0, "reject", reasons + [f"title rejects: /{pat}/"]
+
     # 1. Title match (the strongest signal)
-    if any(t in title for t in target_titles):
+    matched = [t for t in target_titles if re.search(r"(?<![a-z])" + re.escape(t) + r"(?![a-z])", title)]
+    if matched:
         pts += 40
         reasons.append("target title")
     elif cat == "civil" and "engineer" in title:
@@ -108,7 +118,9 @@ def _score_one(j: dict, profile: dict, cat: str, target_titles: list, keyword_po
 
     # 2. Title penalties (seniority, discipline, nationality restrictions)
     for term, pen in profile["title_penalties"].items():
-        if term in title:
+        if term.startswith("_") or any(term in t for t in matched):
+            continue          # e.g. 'surveyor' is not a penalty when the role IS quantity surveyor
+        if re.search(r"(?<![a-z])" + re.escape(term) + r"(?![a-z])", title):
             pts += pen
             reasons.append(f"title:{term}({pen})")
 
@@ -118,7 +130,7 @@ def _score_one(j: dict, profile: dict, cat: str, target_titles: list, keyword_po
             return 0, "reject", [f"hard reject: /{pat}/"]
 
     # 4. Experience fit
-    yrs = profile["candidate"]["years_experience"]
+    yrs = years_experience(profile)
     lo, hi = required_years(text)
     if lo is not None:
         if lo <= yrs and (hi is None or hi >= yrs):

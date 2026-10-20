@@ -27,7 +27,7 @@ PACKS = ROOT / "applications"
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry", action="store_true", help="don't write tracker/sheet")
-    ap.add_argument("--max-enrich", type=int, default=150, help="how many top candidates get full descriptions fetched")
+    ap.add_argument("--max-enrich", type=int, default=350, help="how many new candidates get full descriptions fetched")
     args = ap.parse_args()
     REPORTS.mkdir(exist_ok=True)
     PACKS.mkdir(exist_ok=True)
@@ -54,18 +54,36 @@ def main() -> int:
         j["match_score"], j["verdict"], r = score(j, PROFILE)
         j["reasons"] = "; ".join(r)
     jobs.sort(key=lambda j: -j["match_score"])
-    for j in jobs[: args.max_enrich]:
-        if j["verdict"] != "reject":
-            enrich(j)
+    # Full text is fetched only for jobs not already in the tracker (they were judged on an earlier day),
+    # best first, so the budget goes where it changes a decision.
+    known = tracker.load(TRACKER)
+    tracker.backfill_from_notes(known)
+    swept = tracker.sweep_titles(known, PROFILE)
+    if swept:
+        log(f"Archived {swept} listed jobs that today's title rules exclude (nationals-only, other disciplines)")
+    budget = args.max_enrich
+    for j in jobs:
+        if budget <= 0:
+            break
+        if j["verdict"] == "reject" or j["url"] in known:
+            continue
+        before = len(j.get("description", ""))
+        enrich(j)
+        if len(j.get("description", "")) != before:
+            budget -= 1
             j["match_score"], j["verdict"], r = score(j, PROFILE)
             j["reasons"] = "; ".join(r)
     jobs.sort(key=lambda j: -j["match_score"])
+    log(f"Fetched full descriptions for {args.max_enrich - budget} new candidates")
 
     # 3. dedupe against tracker, prepare packs for new matches
-    known = tracker.load(TRACKER)
     new_rows = []
+    refreshed = 0
     for j in jobs:
-        if j["verdict"] == "reject" or j["url"] in known:
+        if j["url"] in known:
+            refreshed += tracker.refresh(known[j["url"]], j)
+            continue
+        if j["verdict"] == "reject":
             continue
         if j["verdict"] == "apply" and j.get("country") not in countries(PROFILE, "apply"):
             j["verdict"] = "found"          # country searched but applying switched off
@@ -88,6 +106,7 @@ def main() -> int:
         w.writerows(j for j in jobs if j["verdict"] != "reject")
 
     apply_new = [r for r in new_rows if r["verdict"] == "apply"]
+    log(f"Re-checked {refreshed} jobs already in the list (updated details or scores; rejects moved to Archived)")
     print(f"\n=== {stamp}: {len(jobs)} jobs scanned, {sum(1 for j in jobs if j['verdict']!='reject')} relevant, "
           f"{len(new_rows)} new, {len(apply_new)} ready to apply ===")
     for r in sorted(new_rows, key=lambda r: -int(r["score"]))[:25]:

@@ -24,6 +24,9 @@ BUNDLE = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))      # 
 HOME = Path(sys.executable).resolve().parent if FROZEN else Path(__file__).resolve().parent
 DATA = HOME / "data"
 PORT = 8765
+PUBLIC_PATH = "/api/mark"
+PRIVATE_FILES = {"mail.json", "CV.pdf"}
+PRIVATE_DIRS = {"browser", "sent"}
 
 
 def ensure_data():
@@ -74,6 +77,15 @@ def upgrade_config():
                         user["title_penalties"].pop(k); changed = True
                 if user.get("title_penalties", {}).get("intern", 0) < -15:
                     user["title_penalties"]["intern"] = -15; changed = True
+                retired = {r"\b(1[0-9]|[2-9][0-9])\+?\s*(years|yrs)", r"\b(7|8|9)\s*(-|to|–)\s*(1[0-9]|[2-9][0-9])\s*(years|yrs)",
+                           r"\bminimum\s+(7|8|9|1[0-9])\s*(years|yrs)", r"\b(7|8|9)\+\s*(years|yrs)", r"\bsaudi\s+nationals?\s+only\b",
+                           r"\bfor\s+saudis\s+only\b", r"\b(bachelor|degree)\s+in\s+(electrical|mechanical|chemical|computer)\s+engineering\b"}
+                hr = user.get("hard_reject_patterns", [])
+                if any(x in retired for x in hr):
+                    user["hard_reject_patterns"] = [x for x in hr if x not in retired]; changed = True
+                for c in user.get("search", {}).get("countries", {}).values():
+                    if isinstance(c, dict) and c.get("weight", 1.0) != 1.0:
+                        c["weight"] = 1.0; changed = True
             if changed:
                 (DATA / name).write_text(json.dumps(user, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         except Exception as e:  # noqa
@@ -302,9 +314,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        if urlparse(self.path).path == PUBLIC_PATH:      # the only call job sites may make (the apply bar's "I submitted")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
         self.end_headers()
         self.wfile.write(body)
 
@@ -312,13 +325,34 @@ class Handler(BaseHTTPRequestHandler):
         self._send(code, json.dumps(obj, ensure_ascii=False).encode())
 
     def _safe(self, rel: str) -> Path | None:
+        """Files the page may read/write: text files in the data folder, never the mail password, CV, sent mail or browser profile."""
         p = (DATA / rel).resolve()
-        return p if str(p).startswith(str(DATA.resolve())) else None
+        root = DATA.resolve()
+        if not p.is_relative_to(root) or p == root:
+            return None
+        parts = p.relative_to(root).parts
+        if parts[0] in PRIVATE_DIRS or p.name in PRIVATE_FILES or p.suffix.lower() not in (".json", ".csv", ".md", ".txt", ".log"):
+            return None
+        return p
+
+    def _trusted(self) -> bool:
+        """Only this app's own page may use the API. Blocks other websites (Origin) and DNS-rebinding (Host)."""
+        host = (self.headers.get("Host") or "").lower()
+        if host not in (f"127.0.0.1:{PORT}", f"localhost:{PORT}"):
+            return False
+        origin = self.headers.get("Origin")
+        if origin and origin.lower() not in (f"http://127.0.0.1:{PORT}", f"http://localhost:{PORT}"):
+            return urlparse(self.path).path == PUBLIC_PATH and self.command in ("POST", "OPTIONS")
+        return True
 
     def do_OPTIONS(self):
-        self._send(204, b"")
+        if urlparse(self.path).path == PUBLIC_PATH and self._trusted():
+            return self._send(204, b"")
+        return self._send(403, b"")
 
     def do_GET(self):
+        if not self._trusted():
+            return self._json({"error": "forbidden"}, 403)
         u = urlparse(self.path); q = parse_qs(u.query)
         if u.path in ("/", "/index.html"):
             return self._send(200, (BUNDLE / "panel_local.html").read_bytes(), "text/html; charset=utf-8")
@@ -346,6 +380,8 @@ class Handler(BaseHTTPRequestHandler):
         return self._json({"error": "no route"}, 404)
 
     def do_POST(self):
+        if not self._trusted():
+            return self._json({"error": "forbidden"}, 403)
         u = urlparse(self.path); q = parse_qs(u.query)
         n = int(self.headers.get("Content-Length", 0)); body = self.rfile.read(n) if n else b""
         if u.path == "/api/file":
@@ -398,9 +434,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(apply_on_site(d["url"]))
             except Exception as e:
                 return self._json({"ok": False, "error": f"{type(e).__name__}: {e}"})
-        if u.path == "/api/mark":
+        if u.path == PUBLIC_PATH:
             d = json.loads(body or b"{}")
-            return self._json(mark_status(d.get("url", ""), d.get("status", "Applied")))
+            if d.get("url") not in APPLY:            # only jobs you opened with "Apply on site", only to Applied
+                return self._json({"ok": False, "error": "unknown job"}, 403)
+            return self._json(mark_status(d["url"], "Applied"))
         if u.path == "/api/open-folder":
             try:
                 if os.name == "nt": os.startfile(DATA)  # type: ignore[attr-defined]

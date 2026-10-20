@@ -162,7 +162,6 @@
     "head of": -60,
     "chief": -60,
     "specialist": -5,
-    "intern": -15,
     "electrical": -50,
     "mechanical": -50,
     "mep": -40,
@@ -186,7 +185,36 @@
     "emirati": -60,
     "qatari national": -60,
     "p.eng. required": -20,
-    "professional engineer required": -20
+    "professional engineer required": -20,
+    "intern": -15,
+    "internship": -15,
+    "drilling": -50,
+    "completion": -60,
+    "completions": -60,
+    "coiled tubing": -60,
+    "wireline": -60,
+    "frac": -60,
+    "cementing": -60,
+    "well testing": -60,
+    "mud": -50,
+    "reservoir": -60,
+    "petroleum engineer": -50,
+    "geologist": -60,
+    "subsurface": -60,
+    "welding": -40,
+    "piping": -35,
+    "rotating": -50,
+    "static equipment": -40,
+    "instrumentation": -50,
+    "e&i": -50,
+    "linux": -80,
+    "cloud": -70,
+    "devops": -80,
+    "it infrastructure": -80,
+    "data infrastructure": -80,
+    "database": -70,
+    "process engineer": -35,
+    "_comment": "Whole-word matches in the job title. Skipped when the word is part of the target title that matched (e.g. 'surveyor' in 'quantity surveyor')."
   },
   "keyword_points": {
     "water network": 12,
@@ -270,15 +298,17 @@
     "local council": 3
   },
   "hard_reject_patterns": [
-    "\\b(1[0-9]|[2-9][0-9])\\+?\\s*(years|yrs)",
-    "\\b(7|8|9)\\s*(-|to|–)\\s*(1[0-9]|[2-9][0-9])\\s*(years|yrs)",
-    "\\bminimum\\s+(7|8|9|1[0-9])\\s*(years|yrs)",
-    "\\b(7|8|9)\\+\\s*(years|yrs)",
+    "\\b(?:1[0-9]|[2-9][0-9])\\s*\\+?\\s*(?:years|yrs)(?=[^.;\\n]{0,60}\\bexperience)",
+    "\\bexperience[^.;\\n]{0,30}?\\b(?:1[0-9]|[2-9][0-9])\\s*\\+?\\s*(?:years|yrs)",
+    "\\b[7-9]\\s*(?:-|to|–)\\s*(?:1[0-9]|[2-9][0-9])\\s*(?:years|yrs)",
+    "\\bminimum\\s+(?:of\\s+)?(?:[7-9]|1[0-9])\\s*\\+?\\s*(?:years|yrs)",
+    "\\b[7-9]\\s*\\+\\s*(?:years|yrs)(?=[^.;\\n]{0,60}\\bexperience)",
     "\\bph\\.?d\\b",
-    "\\bmaster'?s?\\s+degree\\s+(is\\s+)?(required|mandatory)",
-    "\\bsaudi\\s+nationals?\\s+only\\b",
-    "\\bfor\\s+saudis\\s+only\\b",
-    "\\b(bachelor|degree)\\s+in\\s+(electrical|mechanical|chemical|computer)\\s+engineering\\b"
+    "\\bmaster'?s?\\s+degree\\s+(?:is\\s+)?(?:required|mandatory)",
+    "\\b(?:saudi|uae|emirati|qatari|kuwaiti|omani)\\s+(?:nationals?|citizens?)\\s+only\\b",
+    "\\bonly\\s+(?:saudi|uae|emirati|qatari|kuwaiti|omani)\\s+(?:nationals?|citizens?)\\b",
+    "\\bfor\\s+(?:saudis|emiratis|qataris|kuwaitis|omanis)\\s+only\\b",
+    "\\b(?:bachelor|degree)\\s+in\\s+(?:electrical|mechanical|chemical|computer|petroleum)\\s+engineering\\b(?![^.;\\n]{0,40}\\bcivil\\b)"
   ],
   "experience_fit": {
     "_comment": "Experience ranges that match 4 years earn a bonus; others are penalised in score.py",
@@ -738,5 +768,12 @@
     "gender": "",
     "dob": "",
     "sce_registered": "No"
-  }
+  },
+  "title_reject_patterns": [
+    "\\b(?:uae|emirati|saudi|qatari|kuwaiti|omani)\\s+(?:nationals?|citizens?)\\b",
+    "\\((?:uae|saudi|qatari|kuwaiti|omani)\\s+(?:only|nationals?)\\)",
+    "\\bsaudi\\s+only\\b",
+    "\\bnationals?\\s+only\\b",
+    "\\bemiratisation\\b|\\bsaudi[sz]ation\\b"
+  ]
 }
