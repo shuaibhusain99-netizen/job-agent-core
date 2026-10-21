@@ -234,6 +234,7 @@ dialog.send #mcAd{min-height:90px}
     </div>
     <div class="run">
       <div class="pill"><i class="dot" id="dot"></i><span id="stateText">Starting…</span></div>
+      <button id="updTop" hidden title="A new version of Job Agent is ready">Update ready</button>
       <button id="mailCo" title="Apply to a company you found yourself: the app writes the e-mail and sends it with your CV">E-mail<span class="long"> a company</span></button>
       <button class="primary" id="runNow">Search now</button>
     </div>
@@ -315,6 +316,13 @@ dialog.send #mcAd{min-height:90px}
           <div class="inline" style="margin-top:8px"><button id="runFull">Run a full search now</button><button id="openFolder">Open data folder</button><button class="quiet" id="quitApp" title="Stops the app on this PC. The daily search still runs on its own.">Quit Job Agent</button></div>
           <p class="small faint" id="dataDir"></p>
           <div class="runs" id="runs"></div>
+        </div>
+        <div class="card" id="updCard">
+          <h3>Program version</h3>
+          <p class="hint">Updates install in place: the same JobAgent.exe, with the same list and settings - no downloading by hand. Your list and settings are also backed up by themselves (the last 20 copies), and put back if the list ever goes missing.</p>
+          <p class="small muted" id="verText"></p>
+          <div class="note" id="updNote" role="status" hidden></div>
+          <div class="inline"><button id="updCheck">Check for updates</button><button class="primary" id="updGo" hidden>Update now</button></div>
         </div>
         <div class="card">
           <h3>AI reviewer <span class="badge" id="aiBadge">off</span></h3>
@@ -479,7 +487,29 @@ dialog.send #mcAd{min-height:90px}
       } else autoPick();
     }catch(e){ setState("off",e.message); toast("Couldn't load: "+e.message); }
   }
-  let pollT=null;
+  let pollT=null, curBuild="", restoredShown=false, updChecked=false;
+  async function checkUpdate(manual){
+    if(manual) note($("updNote"),"","Checking for a new version…");
+    try{ const r=await api("/api/update-check",{});
+      if(!r.ok){ if(manual) note($("updNote"),"bad",r.message); return; }
+      $("updTop").hidden=!r.available; $("updGo").hidden=!r.available;
+      if(r.available) note($("updNote"),"","A new version from "+niceDate(r.date)+" is ready. Updating keeps your list and settings.");
+      else if(manual) note($("updNote"),"good","You have the newest version.");
+    }catch(e){ if(manual) note($("updNote"),"bad",e.message); }
+  }
+  async function doUpdate(){
+    if(!confirm("Update Job Agent now? It restarts by itself in a few seconds - your list and settings stay as they are.")) return;
+    $("updGo").disabled=$("updTop").disabled=true; note($("updNote"),"","Downloading the new version (about 10 MB)…"); setState("busy","Downloading the new version…");
+    let r; try{ r=await api("/api/update",{}); }catch(e){ r={ok:false,error:e.message}; }
+    if(!r.ok){ note($("updNote"),"bad",r.error||"The update didn't install."); toast(r.error||"The update didn't install"); $("updGo").disabled=$("updTop").disabled=false; loadStatus(); return; }
+    clearTimeout(pollT); setState("busy","Updating - this page reloads by itself"); note($("updNote"),"",r.message);
+    let n=0; const t=setInterval(async()=>{ n++;
+      try{ const h=await (await fetch("/",{cache:"no-store"})).text(); const m=/name="jobagent-build" content="([^"]*)"/.exec(h); if(m&&m[1]!==curBuild){ clearInterval(t); location.reload(); return; } }catch(_){}
+      if(n>45){ clearInterval(t); setState("off","The update is taking long - start Job Agent again from the same place as before"); } },2000);
+  }
+  $("updCheck").addEventListener("click",()=>checkUpdate(true));
+  $("updGo").addEventListener("click",doUpdate);
+  $("updTop").addEventListener("click",doUpdate);
   async function loadStatus(){
     try{
       const s=await api("/api/status");
@@ -490,6 +520,10 @@ dialog.send #mcAd{min-height:90px}
       $("schedBtn").textContent = s.scheduled ? "Daily search: on" : "Daily search: off"; $("schedBtn").dataset.on = s.scheduled?"1":"";
       if(document.activeElement!==$("schedHour")) $("schedHour").value=String(s.schedule_hour??7);
       $("dataDir").textContent = s.data_dir ? "Data folder: "+s.data_dir : "";
+      curBuild=s.build||""; const bp=curBuild.split(" ");
+      $("verText").textContent = curBuild==="dev" ? "Development copy" : "This version: "+(bp[1]?niceDate(bp[1])+" ":"")+"("+(bp[0]||"")+")";
+      if(s.restored&&!restoredShown){ restoredShown=true; toast("Your list was missing, so it was put back from the backup of "+niceDate(s.restored),{label:"OK",fn:()=>{}}); }
+      if(!updChecked&&curBuild&&curBuild!=="dev"){ updChecked=true; setTimeout(()=>checkUpdate(false),4000); }
       $("runs").innerHTML=(s.runs||[]).map(r=>`<div class="r"><span class="num">${esc(niceDate(r.at)+" "+r.at.slice(11,16))}</span><span class="muted">${esc(r.summary.replace(/^\S+:\s*/,""))}</span></div>`).join("");
       clearTimeout(pollT);
       const at=lr?lr.at:"";

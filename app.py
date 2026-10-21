@@ -23,8 +23,98 @@ FROZEN = getattr(sys, "frozen", False)
 BUNDLE = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))      # read-only program files
 HOME = Path(sys.executable).resolve().parent if FROZEN else Path(__file__).resolve().parent
 DATA = HOME / "data"
-PORT = 8765
+PORT = int(os.environ.get("JOBAGENT_PORT") or 8765)      # another port and data folder only for testing a copy
 TOKEN = secrets.token_urlsafe(24)       # per-launch secret written into the page; every /api call must carry it
+
+
+# ------------------------------------------------------------------ where your data lives
+# The data folder used to be only "data next to the exe": starting a new version from another folder (Downloads, the
+# desktop, straight from the browser) opened an empty list. Now the app remembers the folder, finds your list wherever the
+# exe is started from, and keeps dated backups outside the data folder that are put back if the list ever goes missing.
+APPHOME = Path(os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or Path.home()) / "JobAgent"
+POINTER = APPHOME / "data-folder.txt"
+BACKUPS = APPHOME / "backups"
+BACKUP_FILES = ("tracker.csv", "profile.json", "keys.json", "mail.json", "sources.json", "state.json", "CV.pdf", "ai_usage.json")
+
+
+def _rows_in(folder: Path) -> int:
+    """Rough number of jobs in a data folder (-1 when it isn't one)."""
+    if not (folder / "profile.json").exists():
+        return -1
+    try:
+        with open(folder / "tracker.csv", "rb") as f:
+            return max(0, sum(1 for _ in f) - 1)
+    except OSError:
+        return 0
+
+
+def data_candidates(home: Path) -> list[Path]:
+    up = Path(os.environ.get("USERPROFILE") or Path.home())
+    places = [up / "Documents", up / "Desktop", up / "Downloads", up / "OneDrive" / "Documents", up / "OneDrive" / "Desktop",
+              up / "Documents" / "JobAgent", up / "Desktop" / "JobAgent"]
+    return [home / "data"] + [p / "data" for p in places]
+
+
+def locate_data(home: Path, pointer: Path = None, candidates: list[Path] = None) -> Path:
+    """The folder holding your list: the one used last time if it still has jobs, else the one next to the exe if it has
+    jobs, else the fullest data folder in the usual places, else a new one next to the exe."""
+    pointer = pointer or POINTER
+    candidates = candidates if candidates is not None else data_candidates(home)
+    here = home / "data"
+    try:
+        last = Path(pointer.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        last = None
+    if last and _rows_in(last) > 0:
+        chosen = last
+    elif _rows_in(here) > 0:
+        chosen = here
+    else:
+        full = sorted(((_rows_in(c), c) for c in candidates if c != here), key=lambda x: -x[0])
+        chosen = full[0][1] if full and full[0][0] > 0 else here
+    try:
+        pointer.parent.mkdir(parents=True, exist_ok=True)
+        pointer.write_text(str(chosen.resolve()), encoding="utf-8")
+    except OSError:
+        pass
+    return chosen
+
+
+def backup_data(data: Path, backups: Path = None, keep: int = 20, every_hours: float = 6) -> Path | None:
+    """A dated copy of your list and settings, outside the data folder (at most every few hours; the last 20 are kept)."""
+    backups = backups or BACKUPS
+    if _rows_in(data) <= 0:
+        return None
+    try:
+        backups.mkdir(parents=True, exist_ok=True)
+        old = sorted(d for d in backups.iterdir() if d.is_dir())
+        if old and time.time() - old[-1].stat().st_mtime < every_hours * 3600:
+            return None
+        dest = backups / datetime.now().strftime("%Y-%m-%d_%H%M%S")
+        dest.mkdir()
+        for name in BACKUP_FILES:
+            if (data / name).exists():
+                shutil.copy2(data / name, dest / name)
+        for d in old[:-(keep - 1)] if len(old) >= keep else []:
+            shutil.rmtree(d, ignore_errors=True)
+        return dest
+    except OSError:
+        return None
+
+
+def restore_if_missing(data: Path, backups: Path = None) -> Path | None:
+    """The data folder has no jobs but a backup does (the folder was deleted or emptied): put the newest backup back."""
+    backups = backups or BACKUPS
+    if _rows_in(data) > 0 or not backups.exists():
+        return None
+    for b in sorted((d for d in backups.iterdir() if d.is_dir()), reverse=True):
+        if _rows_in(b) > 0:
+            data.mkdir(parents=True, exist_ok=True)
+            for name in BACKUP_FILES:
+                if (b / name).exists():
+                    shutil.copy2(b / name, data / name)
+            return b
+    return None
 
 
 def _build() -> str:
@@ -42,6 +132,92 @@ PRIVATE_DIRS = {"browser", "browser-search", "sent"}
 PAGE_READS = {"tracker.csv", "profile.json", "sources.json", "runs.log"}
 PAGE_WRITES = {"profile.json", "sources.json"}
 JOOBLE_SITES = ("us", "sa", "ae", "qa", "kw", "om", "bh", "ca", "au")
+
+
+INFO = {"restored": ""}             # set at start when the list was put back from a backup
+
+# ------------------------------------------------------------------ updates (the app replaces itself - no downloading by hand)
+REPO = "shuaibhusain99-netizen/job-agent-core"
+
+
+def _gh(url: str, limit: int = 2_000_000, binary: bool = False) -> bytes:
+    from urllib.request import Request, urlopen
+    h = {"User-Agent": "JobAgent-updater", "Accept": "application/octet-stream" if binary else "application/vnd.github+json"}
+    with urlopen(Request(url, headers=h), timeout=120 if binary else 30) as r:
+        return r.read(limit)
+
+
+def latest_release() -> dict:
+    rel = json.loads(_gh(f"https://api.github.com/repos/{REPO}/releases/tags/latest"))
+    assets = {a.get("name"): a for a in rel.get("assets") or []}
+    exe, marker = assets.get("JobAgent.exe"), assets.get("build.txt")
+    if not exe:
+        raise RuntimeError("the latest release has no JobAgent.exe")
+    build = _gh(marker["browser_download_url"], 200).decode("ascii", "replace").strip()[:40] if marker else ""
+    return {"build": build, "url": exe["browser_download_url"], "size": int(exe.get("size") or 0),
+            "digest": str(exe.get("digest") or ""), "date": str(exe.get("updated_at") or "")[:10]}
+
+
+def _newer(latest: str) -> bool:
+    return bool(latest) and BUILD != "dev" and latest.split()[0] != BUILD.split()[0]
+
+
+def update_check() -> dict:
+    r = latest_release()
+    return {"ok": True, "available": _newer(r["build"]), "current": BUILD, "latest": r["build"], "date": r["date"]}
+
+
+def install_update() -> dict:
+    """Download the newest JobAgent.exe, check it, put it in place of this one (same folder, same data) and restart."""
+    import hashlib
+    if not FROZEN:
+        raise ValueError("This is a development copy - updates are for the installed JobAgent.exe")
+    lock = DATA / RUN_LOCK
+    if STATE["running"] or (lock.exists() and time.time() - lock.stat().st_mtime < 3 * 3600):
+        raise ValueError("A search is running - update when it has finished")
+    r = latest_release()
+    if not _newer(r["build"]):
+        raise ValueError("You already have the newest version")
+    blob = _gh(r["url"], 300_000_000, binary=True)
+    if len(blob) < 3_000_000 or blob[:2] != b"MZ" or (r["size"] and len(blob) != r["size"]):
+        raise RuntimeError("the download was incomplete - try again")
+    if r["digest"].startswith("sha256:") and hashlib.sha256(blob).hexdigest() != r["digest"][7:].lower():
+        raise RuntimeError("the download didn't match the published program - nothing was changed")
+    exe = Path(sys.executable)
+    new = exe.with_name(exe.stem + ".new.exe")
+    new.write_bytes(blob)
+    old = exe.with_name(exe.stem + ".old.exe")
+    try:
+        old.unlink(missing_ok=True)
+    except OSError:                                    # still in use from the last update: use another name
+        old = exe.with_name(f"{exe.stem}.old-{int(time.time())}.exe")
+    exe.rename(old)                                    # Windows lets a running program be renamed (not deleted)
+    try:
+        new.rename(exe)
+    except OSError:
+        old.rename(exe)
+        raise
+    flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    subprocess.Popen([str(exe), "--no-browser"], cwd=str(exe.parent), creationflags=flags, close_fds=True)
+    threading.Thread(target=quit_app, args=(1.5,), daemon=True).start()   # the new copy takes over the port
+    return {"ok": True, "message": f"Updating to the version of {r['date']} - the page reloads in a few seconds"}
+
+
+def tidy_after_update() -> None:
+    """Remove the previous program file left by an update (it can only be deleted once it has stopped)."""
+    if not FROZEN:
+        return
+    exe = Path(sys.executable)
+    for _ in range(6):
+        left = [f for f in exe.parent.glob(exe.stem + ".old*.exe")] + [f for f in exe.parent.glob(exe.stem + ".new.exe")]
+        for f in left:
+            try:
+                f.unlink()
+            except OSError:
+                pass
+        if not left:
+            return
+        time.sleep(10)
 
 
 UPDATING = {"on": False}            # the list is being re-judged after a program update (the page says so)
@@ -922,7 +1098,8 @@ class Handler(BaseHTTPRequestHandler):
                                "log": STATE["log"][-6:] if not elsewhere else ["The daily search is running in the background"],
                                "summary": STATE["summary"], "started": STATE["started"],
                                "runs": [{"at": a, "summary": b} for a, b in reversed(runs)], "scheduled": schedule_status(),
-                               "schedule_hour": schedule_hour(), "data_dir": str(DATA), "build": BUILD})
+                               "schedule_hour": schedule_hour(), "data_dir": str(DATA), "build": BUILD,
+                               "restored": INFO["restored"]})
         if u.path == "/api/mail":
             return self._json(mail_public())
         if u.path == "/api/apply-status":
@@ -1016,6 +1193,18 @@ class Handler(BaseHTTPRequestHandler):
                 m.pop("signin", None); m.pop("signin_error", None)     # new settings: not tried yet
             save_mail(m)
             return self._json({"ok": True} | mail_public())
+        if u.path == "/api/update-check":
+            try:
+                return self._json(update_check())
+            except Exception as e:  # noqa
+                return self._json({"ok": False, "message": f"Couldn't check for updates ({type(e).__name__}: {str(e)[:120]}). Check the internet connection."})
+        if u.path == "/api/update":
+            try:
+                return self._json(install_update())
+            except ValueError as e:
+                return self._json({"ok": False, "error": str(e)})
+            except Exception as e:  # noqa
+                return self._json({"ok": False, "error": f"The update didn't install ({type(e).__name__}: {str(e)[:160]}). Your current version keeps working."})
         if u.path == "/api/mail-test":
             try:
                 with smtp_connect(mail_settings()):
@@ -1279,8 +1468,19 @@ if __name__ == "__main__":
     ap.add_argument("--run", action="store_true", help="search once and exit (used by the scheduled task)")
     ap.add_argument("--no-browser", action="store_true")
     a = ap.parse_args()
+    RESTORED = None
+    if os.environ.get("JOBAGENT_DATA"):
+        DATA = Path(os.environ["JOBAGENT_DATA"])
+    elif FROZEN:
+        DATA = locate_data(HOME)
+        RESTORED = restore_if_missing(DATA)
+        if RESTORED:
+            INFO["restored"] = RESTORED.name[:10]
+    threading.Thread(target=tidy_after_update, daemon=True).start()
     try:
         ensure_data(background=not a.run)
+        if FROZEN and not os.environ.get("JOBAGENT_DATA"):
+            threading.Thread(target=backup_data, args=(DATA,), daemon=True).start()
     except Exception as e:  # noqa - e.g. the exe sits in a folder that can't be written (Program Files, a CD, a locked share)
         alert(f"Job Agent can't create its data folder next to the program:\n{DATA}\n\n{type(e).__name__}: {e}\n\n"
               "Move JobAgent.exe to a folder you can write to (for example Documents\\JobAgent) and start it again.")

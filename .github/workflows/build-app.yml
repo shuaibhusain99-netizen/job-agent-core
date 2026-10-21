@@ -62,6 +62,8 @@ jobs:
         with:
           tag_name: latest
           name: Job Agent (Windows)
-          body: "Private build. Put JobAgent.exe in a folder of your choice and double-click. Your data is kept in a `data` folder next to it, on your PC only."
-          files: dist/JobAgent.exe
+          body: "Put JobAgent.exe in a folder of your choice and double-click. Later versions install themselves from the app (Settings > Program version, or the Update ready button). Your data stays on your PC."
+          files: |
+            dist/JobAgent.exe
+            build.txt
           prerelease: false
