@@ -198,7 +198,8 @@ def install_update() -> dict:
         old.rename(exe)
         raise
     flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-    subprocess.Popen([str(exe), "--no-browser"], cwd=str(exe.parent), creationflags=flags, close_fds=True)
+    env = dict(os.environ, PYINSTALLER_RESET_ENVIRONMENT="1")   # the new copy unpacks itself fresh, not into this one's folder
+    subprocess.Popen([str(exe), "--no-browser"], cwd=str(exe.parent), creationflags=flags, close_fds=True, env=env)
     threading.Thread(target=quit_app, args=(1.5,), daemon=True).start()   # the new copy takes over the port
     return {"ok": True, "message": f"Updating to the version of {r['date']} - the page reloads in a few seconds"}
 
