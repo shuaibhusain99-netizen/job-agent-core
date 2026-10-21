@@ -41,7 +41,7 @@ INDEED_JS = r"""(() => {
     snippet: String(r.snippet || "").replace(/<[^>]+>/g, " "),
     salary: (r.salarySnippet && r.salarySnippet.text) || "",
     posted: r.pubDate ? new Date(r.pubDate).toISOString().slice(0, 10) : "", age: r.formattedRelativeTime || "",
-    expired: !!r.expired }));
+    expired: !!r.expired, easy: !!r.indeedApplyEnabled }));
 })()"""
 
 BAYT_JS = r"""[...document.querySelectorAll('li[data-js-job]')].slice(0, 60).map(c => {
@@ -51,7 +51,7 @@ BAYT_JS = r"""[...document.querySelectorAll('li[data-js-job]')].slice(0, 60).map
   const dt = c.querySelector('[data-automation-id="job-active-date"]');
   return { title: a ? a.textContent.trim() : "", url: a ? a.href : "", company: comp ? comp.textContent.trim() : "",
            location: spans.join(", "), snippet: (c.innerText || c.textContent).replace(/\s+/g, " ").trim().slice(0, 700),
-           age: dt ? dt.textContent.trim() : "" };
+           age: dt ? dt.textContent.trim() : "", easy: /easy apply/i.test(c.innerText || c.textContent) };
 })"""
 
 NAUKRI_JS = r"""[...document.querySelectorAll('.srp-tuple')].slice(0, 60).map(c => {
@@ -62,7 +62,8 @@ NAUKRI_JS = r"""[...document.querySelectorAll('.srp-tuple')].slice(0, 60).map(c 
   const desc = (c.querySelector('.description') || {}).textContent || "";
   return { title: (t || a || {}).textContent ? (t || a).textContent.trim() : "", url: a ? a.href : "",
            company: org ? org.textContent.trim() : "", location: loc,
-           snippet: desc.trim() + (exp ? " Experience: " + exp + "." : ""), age: ((c.querySelector('.time') || {}).textContent || "").trim() };
+           snippet: desc.trim() + (exp ? " Experience: " + exp + "." : ""), age: ((c.querySelector('.time') || {}).textContent || "").trim(),
+           easy: /easy apply/i.test(c.innerText || c.textContent) };
 })"""
 
 GULFTALENT_JS = r"""[...document.querySelectorAll('a.ga-job-click')].slice(0, 60).map(a => {
@@ -408,6 +409,8 @@ def _read_site(key: str, cfg: dict, profile: dict, sess: Session) -> list[dict]:
                         posted = str(r.get("posted") or "")[:10] or parse_age(str(r.get("age") or "")[:40])
                         j = job(str(r.get("title") or "")[:200], str(r.get("company") or "")[:120], loc or country, url,
                                 clean(text), name, c, posted)
+                        if "easy" in r:                  # the board's one-click apply, or (Indeed) sent on to the employer's site
+                            j["apply_how"] = "easy" if r.get("easy") else ("company" if name == "Indeed" else "")
                         if site["detail"]:
                             j["_snippet"] = True             # only the list's summary so far: worth opening the full ad
                         unknown += not util.is_known(j)

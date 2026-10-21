@@ -233,6 +233,17 @@ def _run(args) -> int:
                  "verdict": r.get("verdict", "apply"), "reasons": r.get("notes", "")}
             r["pack_file"] = write_pack(j)
 
+    # how to apply, for LinkedIn jobs saved before the agent recorded it (To apply first, best matches first)
+    if not args.dry:
+        from agent.sources import check_linkedin_apply
+        todo = [r for r in known.values() if r.get("source") == "LinkedIn" and not r.get("apply_how") and not r.get("apply_email")
+                and r.get("status") in tracker.OPEN]
+        todo.sort(key=lambda r: (r.get("status") != "New", -tracker._int(r.get("score"))))
+        try:
+            check_linkedin_apply(todo, 40)
+        except Exception as e:  # noqa - only a convenience
+            log(f"LinkedIn apply check stopped: {type(e).__name__}: {e}")
+
     # 5. report (a copy you can open in Excel; old ones are cleared after 30 days)
     stamp = date.today().isoformat()
     write_report(stamp, jobs)

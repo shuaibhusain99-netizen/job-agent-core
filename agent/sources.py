@@ -251,6 +251,37 @@ def fetch_linkedin(cfg: dict, profile: dict) -> list[dict]:
     return out
 
 
+def linkedin_apply_how(body: str) -> str:
+    """LinkedIn's job page: 'onsite' apply is Easy Apply on LinkedIn, 'offsite' sends you to the employer's own site."""
+    if "public_jobs_apply-link-onsite" in body:
+        return "easy"
+    if "apply-link-offsite" in body:
+        return "company"
+    return ""
+
+
+def check_linkedin_apply(rows: list[dict], budget: int = 40) -> int:
+    """How to apply, for LinkedIn jobs saved before the agent recorded it: one polite request each, a few per search."""
+    done = 0
+    for r in rows[:budget]:
+        m = re.search(r"-(\d{6,})/?$", r["url"].split("?")[0]) or re.search(r"/jobs/view/(\d{6,})", r["url"])
+        if not m:
+            continue
+        status, body = http(f"https://www.linkedin.com/jobs/view/{m.group(1)}")
+        if status != 200:
+            if status in (0, 403, 429, 999) or status >= 500:
+                break                                   # LinkedIn wants a rest: the rest waits for the next search
+            continue
+        how = linkedin_apply_how(body)
+        if how:
+            r["apply_how"] = how
+            done += 1
+        time.sleep(random.uniform(1.0, 2.0))
+    if done:
+        log(f"LinkedIn: checked how to apply for {done} saved jobs")
+    return done
+
+
 def enrich_linkedin(j: dict) -> None:
     m = re.search(r"-(\d{6,})/?$", j["url"].split("?")[0]) or re.search(r"/jobs/view/(\d{6,})", j["url"])
     if not m:
@@ -258,6 +289,9 @@ def enrich_linkedin(j: dict) -> None:
     status, body = http(f"https://www.linkedin.com/jobs/view/{m.group(1)}")
     if status != 200:
         return
+    how = linkedin_apply_how(body)
+    if how:
+        j["apply_how"] = how
     d = re.search(r'show-more-less-html__markup[^>]*>([\s\S]*?)</div>', body)
     if d:
         j["description"] = clean(d.group(1), keep_lines=True)[:6000]

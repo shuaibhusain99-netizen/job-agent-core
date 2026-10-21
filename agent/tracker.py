@@ -19,7 +19,7 @@ from .util import log
 
 FIELDS = ["found_date", "score", "verdict", "title", "company", "location", "country", "source",
           "url", "status", "applied_date", "notes", "pack_file", "user_notes", "category", "sector", "salary", "apply_email",
-          "posted", "desc_len", "level", "ai_fit", "ai_summary", "touched", "last_seen"]
+          "posted", "desc_len", "level", "ai_fit", "ai_summary", "touched", "last_seen", "apply_how"]
 USER_FIELDS = ("status", "applied_date", "user_notes", "touched")     # touched = the day you last changed it in the app
 DATE_FIELDS = ("found_date", "applied_date", "posted", "touched", "last_seen")
 OPEN = ("New", "Review")
@@ -402,10 +402,11 @@ def row_from_job(j: dict) -> dict:
         "sector": j.get("sector", ""), "salary": j.get("salary", ""), "apply_email": j.get("apply_email", ""),
         "posted": j.get("posted", ""), "desc_len": str(text_len(j)), "level": j.get("level", ""),
         "ai_fit": (j.get("ai") or {}).get("fit", ""), "ai_summary": (j.get("ai") or {}).get("summary", "")[:300],
+        "apply_how": j.get("apply_how", ""),
     }
 
 
-FILL = ("salary", "apply_email", "posted")
+FILL = ("salary", "apply_email", "posted", "apply_how")   # apply_how: "easy" (the board's own quick apply) or "company" (employer's site)
 
 
 def _untouched(row: dict) -> bool:

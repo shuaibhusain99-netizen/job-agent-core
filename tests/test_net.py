@@ -215,6 +215,21 @@ class Logs(unittest.TestCase):
         self.assertIn("jooble.org/api/<key>", out)
 
 
+class ApplyHow(unittest.TestCase):
+    def test_linkedin_easy_apply_and_company_site_are_told_apart(self):
+        from agent import sources
+        self.assertEqual(sources.linkedin_apply_how('<a data-tracking-control-name="public_jobs_apply-link-onsite">Easy Apply</a>'), "easy")
+        self.assertEqual(sources.linkedin_apply_how('<a data-tracking-control-name="public_jobs_apply-link-offsite_contextual-sign-in-modal_join-link">'), "company")
+        self.assertEqual(sources.linkedin_apply_how("<html>nothing</html>"), "")
+
+    def test_the_way_to_apply_is_kept_and_filled_in_later(self):
+        from agent import tracker
+        self.assertIn("apply_how", tracker.FIELDS)
+        row = {"apply_how": "", "status": "Applied", "last_seen": ""}
+        tracker.refresh(row, {"apply_how": "easy"})
+        self.assertEqual(row["apply_how"], "easy")
+
+
 class Placeholders(unittest.TestCase):
     def test_answers_follow_your_details(self):
         from agent.tailor import answer_for

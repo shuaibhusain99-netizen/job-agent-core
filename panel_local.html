@@ -269,13 +269,13 @@ dialog.send #mcAd{min-height:90px}
         <div class="levels" id="fLevel" role="group" aria-label="Level">
           <button data-l="">Any level</button><button data-l="starter">Starter</button><button data-l="support">Support</button><button data-l="match">My level</button><button data-l="senior">Senior</button>
         </div>
+        <div class="ms" id="msHow" title="How you apply"></div>
         <select id="fSort" aria-label="Sort"><option value="score">Best match</option><option value="date">Newest ad</option><option value="pay">Pay stated first</option><option value="company">Company</option><option value="country">Country</option></select>
         <button class="quiet small" id="moreF" aria-expanded="false" aria-controls="moreFilters">More filters</button>
       </div>
       <div class="filters more" id="moreFilters" hidden>
         <div class="ms" id="msSource"></div>
         <label class="toggle"><input type="checkbox" id="fPay"> Pay stated</label>
-        <label class="toggle"><input type="checkbox" id="fMail"> Apply by e-mail</label>
         <select id="fDays" aria-label="Found"><option value="">Found: any time</option><option value="1">Found today</option><option value="3">Found in the last 3 days</option><option value="7">Found in the last 7 days</option><option value="30">Found in the last 30 days</option></select>
       </div>
       <div class="listbar"><span><span id="count"></span> <button class="quiet small" id="clearF" hidden>Clear filters</button></span><button class="quiet small danger" id="skipAll" hidden>Skip these</button></div>
@@ -376,7 +376,20 @@ dialog.send #mcAd{min-height:90px}
   const SHORT_NAME = {"United Arab Emirates":"UAE"};
   const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
   let profile=null, keysSet={}, tracker=[], mail={}, tab="todo", sec="all", view="list", selUrl="", detailCache={}, aiActive=false, lastRunAt=null;
-  const filt={text:"", countries:new Set(), sources:new Set(), level:"", pay:false, mail:false, days:"", sort:"score"};
+  const filt={text:"", countries:new Set(), sources:new Set(), how:new Set(), level:"", pay:false, days:"", sort:"score"};
+  // how you apply: from the ad (an e-mail address), what the job board showed (Easy Apply / the employer's site), or the kind of site
+  const HOW={email:"By e-mail",easy:"Easy apply",company:"Company website",board:"On the job site",ad:"See the ad",unknown:"Not checked yet"};
+  const HOW_ORDER=Object.values(HOW);
+  const EASY_SITES=new Set(["Bayt","NaukriGulf"]), BOARD_SITES=new Set(["GulfTalent","Job Bank","SEEK","Rigzone"]), AD_SITES=new Set(["Jooble","Google Alerts","Gulf Job Paper"]);
+  function howOf(r){
+    if(r.apply_email||r.source==="Your e-mail") return HOW.email;
+    if(r.apply_how==="easy"||(!r.apply_how&&EASY_SITES.has(r.source))) return HOW.easy;
+    if(r.apply_how==="company") return HOW.company;
+    if(r.source==="LinkedIn"||r.source==="Indeed") return HOW.unknown;      // checked on the next searches
+    if(BOARD_SITES.has(r.source)) return HOW.board;
+    if(AD_SITES.has(r.source)) return HOW.ad;
+    return HOW.company;                                                       // employers' own career sites
+  }
   const localISO = d => new Date(d.getTime()-d.getTimezoneOffset()*6e4).toISOString().slice(0,10);
   const today = () => localISO(new Date());
   const niceDate = iso => { const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(iso||""); return m ? `${+m[3]} ${MONTHS[+m[2]-1]}`+(m[1]!==today().slice(0,4)?` ${m[1]}`:"") : ""; };
@@ -513,16 +526,16 @@ dialog.send #mcAd{min-height:90px}
     const uniq=k=>[...new Set(tracker.map(r=>r[k]).filter(Boolean))].sort();
     multi("msCountry","All countries",uniq("country"),filt.countries);
     multi("msSource","All sources",uniq("source"),filt.sources);
+    multi("msHow","Any way to apply",HOW_ORDER,filt.how);
   }
   let typeT; $("fText").addEventListener("input",()=>{ clearTimeout(typeT); typeT=setTimeout(()=>{ filt.text=$("fText").value.trim().toLowerCase(); render(); },150); });
   const after = el => { el.blur(); };      // keyboard shortcuts work again right after using a filter
   $("fDays").addEventListener("change",e=>{ filt.days=e.target.value; render(); after(e.target); });
   $("fSort").addEventListener("change",e=>{ filt.sort=e.target.value; render(); after(e.target); });
   $("fPay").addEventListener("change",e=>{ filt.pay=e.target.checked; render(); after(e.target); });
-  $("fMail").addEventListener("change",e=>{ filt.mail=e.target.checked; render(); after(e.target); });
   $("fLevel").addEventListener("click",e=>{ const b=e.target.closest("button"); if(!b) return; filt.level=b.dataset.l; render(); });
   $("moreF").addEventListener("click",()=>{ const m=$("moreFilters"); m.hidden=!m.hidden; $("moreF").setAttribute("aria-expanded",m.hidden?"false":"true"); $("moreF").textContent=m.hidden?"More filters":"Fewer filters"; });
-  $("clearF").addEventListener("click",()=>{ filt.countries.clear(); filt.sources.clear(); Object.assign(filt,{text:"",level:"",pay:false,mail:false,days:""}); $("fText").value=""; $("fPay").checked=false; $("fMail").checked=false; $("fDays").value=""; buildFilters(); render(); });
+  $("clearF").addEventListener("click",()=>{ filt.countries.clear(); filt.sources.clear(); filt.how.clear(); Object.assign(filt,{text:"",level:"",pay:false,days:""}); $("fText").value=""; $("fPay").checked=false; $("fDays").value=""; buildFilters(); render(); });
 
   // ---------- list
   let shown=[];
@@ -539,17 +552,18 @@ dialog.send #mcAd{min-height:90px}
     const base=inTab.filter(r=>sec==="all"||secOf(r)===sec);
     const cutoff=filt.days?localISO(new Date(Date.now()-(+filt.days-1)*864e5)):"";
     const pass=r=>(!filt.countries.size||filt.countries.has(r.country))&&(!filt.sources.size||filt.sources.has(r.source))&&(!filt.level||(r.level||"match")===filt.level)
-      &&(!filt.pay||r.salary)&&(!filt.mail||r.apply_email)&&(!cutoff||(r.found_date||"")>=cutoff)
+      &&(!filt.pay||r.salary)&&(!filt.how.size||filt.how.has(howOf(r)))&&(!cutoff||(r.found_date||"")>=cutoff)
       &&(!filt.text||(r.title+" "+r.company+" "+r.location+" "+r.country+" "+(r.user_notes||"")).toLowerCase().includes(filt.text));
     shown=base.filter(pass);
     const cnt=k=>base.reduce((m,r)=>(m[r[k]]=(m[r[k]]||0)+1,m),{});
     $("msCountry").redraw(cnt("country")); $("msSource").redraw(cnt("source"));
+    $("msHow").redraw(base.reduce((m,r)=>{ const h=howOf(r); m[h]=(m[h]||0)+1; return m; },{}));
     const ST=s=>["Offer","Interview","Applied","Rejected"].indexOf(s);
     const S={score:(a,b)=>(+b.score)-(+a.score)||adDate(b).localeCompare(adDate(a)), date:(a,b)=>adDate(b).localeCompare(adDate(a))||(+b.score)-(+a.score),
       pay:(a,b)=>((b.salary?1:0)-(a.salary?1:0))||(+b.score)-(+a.score), company:(a,b)=>a.company.localeCompare(b.company), country:(a,b)=>(a.country||"").localeCompare(b.country||"")||(+b.score)-(+a.score)};
     shown.sort(tab==="applied" ? ((a,b)=>ST(a.status)-ST(b.status)||(b.applied_date||"").localeCompare(a.applied_date||"")) : (S[filt.sort]||S.score));
     $("fSort").hidden=tab==="applied";
-    const anyFilter=filt.countries.size||filt.sources.size||filt.level||filt.pay||filt.mail||filt.days||filt.text;
+    const anyFilter=filt.countries.size||filt.sources.size||filt.how.size||filt.level||filt.pay||filt.days||filt.text;
     $("clearF").hidden=!anyFilter;
     const canSkip=(tab==="todo"||tab==="review")&&shown.length&&anyFilter;
     $("skipAll").hidden=!canSkip; $("skipAll").textContent=`Skip these ${shown.length}`;
@@ -566,7 +580,7 @@ dialog.send #mcAd{min-height:90px}
       const s=+r.score||0, isNew=r.found_date===today()&&r.status==="New";
       const bad=/deal-breakers:/.test(r.notes||"");
       const tags=[isNew?'<span class="tag new">New today</span>':"", bad?'<span class="tag bad">Deal-breaker</span>':"", r.level&&r.level!=="match"?`<span class="tag lv-${esc(r.level)}">${esc(LEVEL_NAME[r.level]||r.level)}</span>`:"",
-        r.salary?`<span class="tag pay">${esc(r.salary)}</span>`:"", r.apply_email?'<span class="tag mail">Apply by e-mail</span>':"",
+        r.salary?`<span class="tag pay">${esc(r.salary)}</span>`:"", r.apply_email?'<span class="tag mail">Apply by e-mail</span>':(howOf(r)===HOW.easy?'<span class="tag mail">Easy apply</span>':""),
         secOf(r)==="oil"&&sec!=="oil"?'<span class="tag og">Oil &amp; gas</span>':"", (sec==="all"||sec==="other")&&secOf(r)!=="oil"?`<span class="tag">${esc(roleLabel(r.category))}</span>`:"",
         r.ai_fit?`<span class="tag ai" title="${esc(r.ai_summary||"")}">AI ${esc(r.ai_fit)}</span>`:""].join("");
       let line="";
@@ -644,7 +658,7 @@ dialog.send #mcAd{min-height:90px}
     const wasClosed=$("detail").classList.contains("closed"); $("detail").classList.remove("closed");
     if(wasClosed && matchMedia("(max-width:1100px)").matches) history.pushState({ja:1},"");
     const d=$("detail");
-    const cells=[["Location",r.location||r.country],["Country",r.country||"Unknown"],["Ad posted",r.posted?niceDate(r.posted):"Not stated"],["Found",niceDate(r.found_date)],["Level",LEVEL_NAME[r.level]||"Not judged"],["Pay",r.salary||"Not stated"],["Role",roleLabel(r.category)],["Source",r.source],["Apply by e-mail",r.apply_email||"No"]];
+    const cells=[["Location",r.location||r.country],["Country",r.country||"Unknown"],["Ad posted",r.posted?niceDate(r.posted):"Not stated"],["Found",niceDate(r.found_date)],["Level",LEVEL_NAME[r.level]||"Not judged"],["Pay",r.salary||"Not stated"],["Role",roleLabel(r.category)],["Source",r.source],["How to apply",r.apply_email?"E-mail "+r.apply_email:(howOf(r)===HOW.easy&&r.source!=="Your e-mail"?"Easy apply on "+r.source:howOf(r))]];
     const ex=explain(r.notes);
     d.innerHTML=`<div class="backbar"><button id="back">Back to the list</button><span class="small faint">or press Esc</span></div><div class="sheet">
       <div class="tb-head"><div class="tb-title"><h1>${esc(r.title)}</h1><div class="co">${esc(r.company)}</div></div>
