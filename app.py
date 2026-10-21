@@ -203,7 +203,7 @@ def install_update() -> dict:
     return {"ok": True, "message": f"Updating to the version of {r['date']} - the page reloads in a few seconds"}
 
 
-def tidy_after_update() -> None:
+def tidy_after_update() -> None:  # runs at every start
     """Remove the previous program file left by an update (it can only be deleted once it has stopped)."""
     if not FROZEN:
         return
