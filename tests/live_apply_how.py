@@ -7,7 +7,7 @@ from agent import sitebrowse, util  # noqa: E402
 
 DATA = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("data")
 rows = list(csv.DictReader(open(DATA / "tracker.csv", encoding="utf-8-sig")))
-li = [r["url"] for r in rows if r.get("source") == "LinkedIn"][:8]
+li = []
 print("== LinkedIn job pages")
 for u in li:
     m = re.search(r"-(\d{6,})/?$", u.split("?")[0]) or re.search(r"/jobs/view/(\d{6,})", u)
@@ -28,12 +28,16 @@ NAUK = r"""[...document.querySelectorAll('.srp-tuple')].slice(0, 8).map(c => ({t
 sitebrowse.PROFILE_DIR = Path(tempfile.mkdtemp(prefix="jobagent-probe-")) / "browser-search"
 sess = sitebrowse._session({"show_window": False})
 try:
-    sess.start(); tab = sess.tab()
-    for name, url, js in (("indeed", "https://sa.indeed.com/jobs?q=civil+engineer&sort=date", PROBE),
+    sess.start()
+    for name, url, js in (
                           ("bayt", "https://www.bayt.com/en/saudi-arabia/jobs/civil-engineer-jobs/", BAYT),
                           ("naukri", "https://www.naukrigulf.com/civil-engineer-jobs-in-saudi-arabia", NAUK)):
-        sitebrowse._goto(tab, url, settle=2)
-        time.sleep(3)
-        print("==", name); print(json.dumps(sitebrowse._eval(tab, js), ensure_ascii=False, indent=0)[:3000])
+        try:
+            tab = sess.tab()
+            sitebrowse._goto(tab, url, settle=2)
+            time.sleep(4)
+            print("==", name); print(json.dumps(sitebrowse._eval(tab, js), ensure_ascii=False)[:2500])
+        except Exception as e:
+            print("==", name, "failed", e); sess.drop_tab()
 finally:
     sitebrowse.close()
